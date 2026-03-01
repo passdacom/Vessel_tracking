@@ -23,6 +23,8 @@
   height: 100%;
   width: 100%;
   background: #1a2332;
+  z-index: 0;
+  position: relative;
 }
 
 /* Custom popup styles */
@@ -33,4 +35,9 @@
 
 .leaflet-popup-content {
   margin: 12px 16px;
+}
+
+/* 모달 오버레이가 Leaflet 지도 위에 표시되도록 z-index 설정 */
+.modal-overlay {
+  z-index: 10000 !important;
 }

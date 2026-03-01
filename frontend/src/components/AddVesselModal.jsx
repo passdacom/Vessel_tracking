@@ -33,7 +33,7 @@ export default function AddVesselModal({ onAdd, onClose, existingCount }) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[10000]"
       onClick={onClose}
     >
       <div
