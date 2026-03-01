@@ -1,0 +1,32 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Vessel {
+  id        Int        @id @default(autoincrement())
+  mmsi      String     @unique
+  name      String?
+  alias     String?
+  color     String     @default("#3b82f6")
+  createdAt DateTime   @default(now())
+  positions Position[]
+}
+
+model Position {
+  id        Int      @id @default(autoincrement())
+  vesselId  Int
+  vessel    Vessel   @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  lat       Float
+  lon       Float
+  cog       Float?
+  sog       Float?
+  heading   Int?
+  timestamp DateTime @default(now())
+
+  @@index([vesselId, timestamp(sort: Desc)])
+}
