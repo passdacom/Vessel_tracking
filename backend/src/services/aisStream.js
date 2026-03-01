@@ -18,7 +18,7 @@ export function createAisClient(prisma, onPosition) {
     ws.on('open', () => {
       console.log('[AIS] Connected to AISStream.io');
       ws.send(JSON.stringify({
-        APIKey: process.env.AISSTREAM_API_KEY,
+        Apikey: process.env.AISSTREAM_API_KEY,
         BoundingBoxes: [[[-90, -180], [90, 180]]],
         FiltersShipMMSI: mmsiList,
       }));
