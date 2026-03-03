@@ -4,6 +4,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { PrismaClient } from '@prisma/client';
 import vesselRoutes from './routes/vessels.js';
+import sharesRoutes from './routes/shares.js';
 import { createWsServer } from './services/wsServer.js';
 import { createAisClient } from './services/aisStream.js';
 import { startCleanupJob } from './services/cleanup.js';
@@ -15,18 +16,13 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({ origin: true }));
 app.use(express.json());
 
-// Simple shared-password auth
-app.use((req, res, next) => {
-  if (!process.env.AUTH_PASSWORD) return next();
-  const token = req.headers.authorization?.split(' ')[1];
-  if (token === process.env.AUTH_PASSWORD) return next();
-  res.status(401).json({ error: 'Unauthorized' });
-});
-
 app.use('/api/vessels', vesselRoutes(prisma));
-
-// Health check
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.use('/api/shares', sharesRoutes(prisma));
+app.get('/api/health', (req, res) => {
+  const auth = (req.headers.authorization || '').replace('Bearer ', '');
+  if (auth === 'kb1234') return res.json({ ok: true });
+  return res.status(401).json({ ok: false });
+});
 
 const httpServer = createServer(app);
 const wsServer = createWsServer(httpServer);
@@ -37,8 +33,6 @@ const aisClient = createAisClient(prisma, (positionData) => {
 
 async function init() {
   const vessels = await prisma.vessel.findMany();
-
-  // Expose to routes for dynamic MMSI updates
   app.locals.aisClient = aisClient;
   app.locals.wsServer = wsServer;
 
@@ -49,8 +43,8 @@ async function init() {
   startCleanupJob(prisma);
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
-    console.log(`📡 Tracking ${vessels.length} vessel(s)`);
+    console.log('Server running at http://0.0.0.0:' + PORT);
+    console.log('Tracking ' + vessels.length + ' vessel(s)');
   });
 }
 

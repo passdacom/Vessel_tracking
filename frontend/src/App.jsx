@@ -1,39 +1,112 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Map from './components/Map/index.jsx';
-import Sidebar from './components/Sidebar/index.jsx';
-import AddVesselModal from './components/AddVesselModal.jsx';
-import LoginPage from './components/LoginPage.jsx';
-import { useWebSocket } from './hooks/useWebSocket.js';
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import LoginPage from "./components/LoginPage.jsx";
+import SharePanel from "./components/SharePanel.jsx";
+import Map from "./components/Map/index.jsx";
+import Sidebar from "./components/Sidebar/index.jsx";
+import AddVesselModal from "./components/AddVesselModal.jsx";
+import ManualPositionModal from "./components/ManualPositionModal.jsx";
+import { useWebSocket } from "./hooks/useWebSocket.js";
+
+function ReportTable({ vessels, positions }) {
+  const now = new Date().toUTCString();
+  return (
+    <>
+      <div className="print-report-header">
+        <h1 style={{ fontSize: "18px", fontWeight: "bold", color: "#1e3a5f", margin: 0 }}>Vessel Position Report</h1>
+        <p style={{ fontSize: "11px", color: "#555", margin: "4px 0 0" }}>Generated: {now}</p>
+      </div>
+      <div className="print-report-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Vessel Name</th>
+              <th>MMSI</th>
+              <th>Latitude</th>
+              <th>Longitude</th>
+              <th>Speed (kn)</th>
+              <th>Course (°)</th>
+              <th>Heading (°)</th>
+              <th>Last Update (UTC)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vessels.map((v) => {
+              const pos = positions[v.id]?.[0];
+              const stale = !pos || Date.now() - new Date(pos.timestamp) > 2 * 60 * 60 * 1000;
+              return (
+                <tr key={v.id}>
+                  <td style={{ fontWeight: "bold" }}>{v.alias || v.name || v.mmsi}</td>
+                  <td>{v.mmsi}</td>
+                  <td>{pos ? pos.lat?.toFixed(5) : "-"}</td>
+                  <td>{pos ? pos.lon?.toFixed(5) : "-"}</td>
+                  <td>{pos?.sog?.toFixed(1) ?? "-"}</td>
+                  <td>{pos?.cog?.toFixed(0) ?? "-"}</td>
+                  <td>{pos?.heading?.toFixed(0) ?? "-"}</td>
+                  <td>{pos ? new Date(pos.timestamp).toUTCString() : "-"}</td>
+                  <td style={{ color: stale ? "#dc2626" : "#16a34a", fontWeight: "bold" }}>
+                    {!pos ? "No Data" : stale ? "Stale" : "Active"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
 
 function App() {
-  const [authToken, setAuthToken] = useState(() => localStorage.getItem('auth_token') || '');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [vessels, setVessels] = useState([]);
-  // positions: { [vesselId]: Position[] }  newest-first
   const [positions, setPositions] = useState({});
   const [trackHours, setTrackHours] = useState(24);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showManualModal, setShowManualModal] = useState(false);
   const [selectedVesselId, setSelectedVesselId] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(() => localStorage.getItem("vessel_auth") === "kb1234");
+  const [showSharePanel, setShowSharePanel] = useState(false);
+
+  const handleLogin = (pw) => {
+    localStorage.setItem("vessel_auth", pw);
+    setIsAuthed(true);
+  };
+  const handleLogout = () => {
+    localStorage.removeItem("vessel_auth");
+    setIsAuthed(false);
+  };
+  const [hiddenVessels, setHiddenVessels] = useState(new Set());
+  const [showRestrictedZone, setShowRestrictedZone] = useState(true);
+
+  const handleToggleVessel = (id) => {
+    setHiddenVessels(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleZone = () => setShowRestrictedZone(v => !v);
 
   const trackHoursRef = useRef(trackHours);
   trackHoursRef.current = trackHours;
 
-  // ── API helper ──────────────────────────────────────────────────────────────
   const apiFetch = useCallback(
-    (path, options = {}) =>
-      fetch(`/api${path}`, {
+    (path, options = {}) => {
+      const password = localStorage.getItem("vessel_auth") || "";
+      return fetch(`/api${path}`, {
         ...options,
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${password}`,
           ...options.headers,
         },
-      }),
-    [authToken]
+      });
+    },
+    []
   );
 
-  // ── Load positions for a list of vessels ───────────────────────────────────
   const loadPositions = useCallback(
     async (vesselList) => {
       if (vesselList.length === 0) return;
@@ -46,106 +119,61 @@ function App() {
       );
       setPositions((prev) => {
         const next = { ...prev };
-        results.forEach(({ id, positions: pos }) => {
-          next[id] = pos;
-        });
+        results.forEach(({ id, positions: pos }) => { next[id] = pos; });
         return next;
       });
     },
     [apiFetch]
   );
 
-  // ── Auth check on startup ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!authToken) return;
-    apiFetch('/health').then((res) => {
-      if (res.ok) {
-        setIsLoggedIn(true);
-      } else {
-        localStorage.removeItem('auth_token');
-        setAuthToken('');
-      }
-    });
+    apiFetch("/vessels")
+      .then((r) => r.json())
+      .then((data) => { setVessels(data); loadPositions(data); });
   }, []); // eslint-disable-line
 
-  // ── Load vessels when logged in ────────────────────────────────────────────
   useEffect(() => {
-    if (!isLoggedIn) return;
-    apiFetch('/vessels')
-      .then((r) => r.json())
-      .then((data) => {
-        setVessels(data);
-        loadPositions(data);
-      });
-  }, [isLoggedIn]); // eslint-disable-line
-
-  // ── Reload positions when trackHours changes ───────────────────────────────
-  useEffect(() => {
-    if (!isLoggedIn || vessels.length === 0) return;
+    if (vessels.length === 0) return;
     loadPositions(vessels);
   }, [trackHours]); // eslint-disable-line
 
-  // ── WebSocket ──────────────────────────────────────────────────────────────
-  const wsUrl = isLoggedIn
-    ? `ws://${window.location.hostname}:3001/ws?token=${encodeURIComponent(authToken)}`
-    : null;
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsHost = window.location.protocol === "https:" ? window.location.host : `${window.location.hostname}:3001`;
+  const wsUrl = `${proto}//${wsHost}/ws`;
 
   useWebSocket(wsUrl, (msg) => {
-    if (msg.type === 'position') {
+    if (msg.type === "position") {
       const { vesselId } = msg.data;
       setPositions((prev) => ({
         ...prev,
         [vesselId]: [msg.data, ...(prev[vesselId] || [])].slice(0, 2000),
       }));
-    } else if (msg.type === 'vessel_added') {
+    } else if (msg.type === "vessel_added") {
       const newVessel = msg.data;
-      setVessels((prev) =>
-        prev.find((v) => v.id === newVessel.id) ? prev : [...prev, newVessel]
-      );
-      // Load historical positions for the new vessel
+      setVessels((prev) => prev.find((v) => v.id === newVessel.id) ? prev : [...prev, newVessel]);
       apiFetch(`/vessels/${newVessel.id}/positions?hours=${trackHoursRef.current}`)
         .then((r) => r.json())
         .then((pos) => setPositions((prev) => ({ ...prev, [newVessel.id]: pos })));
-    } else if (msg.type === 'vessel_updated') {
-      setVessels((prev) =>
-        prev.map((v) => (v.id === msg.data.id ? { ...v, ...msg.data } : v))
-      );
-    } else if (msg.type === 'vessel_removed') {
+    } else if (msg.type === "vessel_updated") {
+      setVessels((prev) => prev.map((v) => (v.id === msg.data.id ? { ...v, ...msg.data } : v)));
+    } else if (msg.type === "vessel_removed") {
       setVessels((prev) => prev.filter((v) => v.id !== msg.data.id));
-      setPositions((prev) => {
-        const next = { ...prev };
-        delete next[msg.data.id];
-        return next;
-      });
+      setPositions((prev) => { const next = { ...prev }; delete next[msg.data.id]; return next; });
       if (selectedVesselId === msg.data.id) setSelectedVesselId(null);
     }
   });
 
-  // Track WS connection status via ping
   useEffect(() => {
-    if (!isLoggedIn) return;
     const check = () => {
-      apiFetch('/health')
-        .then((r) => setWsConnected(r.ok))
-        .catch(() => setWsConnected(false));
+      apiFetch("/health").then((r) => setWsConnected(r.ok)).catch(() => setWsConnected(false));
     };
     check();
     const id = setInterval(check, 10000);
     return () => clearInterval(id);
-  }, [isLoggedIn, apiFetch]);
-
-  // ── Handlers ───────────────────────────────────────────────────────────────
-  const handleLogin = (password) => {
-    setAuthToken(password);
-    localStorage.setItem('auth_token', password);
-    setIsLoggedIn(true);
-  };
+  }, [apiFetch]);
 
   const handleAddVessel = async (mmsi, alias, color) => {
-    const res = await apiFetch('/vessels', {
-      method: 'POST',
-      body: JSON.stringify({ mmsi, alias, color }),
-    });
+    const res = await apiFetch("/vessels", { method: "POST", body: JSON.stringify({ mmsi, alias, color }) });
     if (res.ok) {
       const vessel = await res.json();
       setVessels((prev) => (prev.find((v) => v.id === vessel.id) ? prev : [...prev, vessel]));
@@ -157,31 +185,39 @@ function App() {
   };
 
   const handleDeleteVessel = async (id) => {
-    await apiFetch(`/vessels/${id}`, { method: 'DELETE' });
+    await apiFetch(`/vessels/${id}`, { method: "DELETE" });
     setVessels((prev) => prev.filter((v) => v.id !== id));
-    setPositions((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    setPositions((prev) => { const next = { ...prev }; delete next[id]; return next; });
     if (selectedVesselId === id) setSelectedVesselId(null);
   };
 
   const handleUpdateVessel = async (id, updates) => {
-    const res = await apiFetch(`/vessels/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(updates),
-    });
+    const res = await apiFetch(`/vessels/${id}`, { method: "PATCH", body: JSON.stringify(updates) });
     if (res.ok) {
       const updated = await res.json();
       setVessels((prev) => prev.map((v) => (v.id === updated.id ? { ...v, ...updated } : v)));
     }
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-  if (!isLoggedIn) {
-    return <LoginPage onLogin={handleLogin} />;
-  }
+  const handleManualPosition = async (vesselId, posData) => {
+    const res = await apiFetch(`/vessels/${vesselId}/positions`, {
+      method: "POST",
+      body: JSON.stringify(posData),
+    });
+    if (res.ok) {
+      const pos = await res.json();
+      setPositions((prev) => ({
+        ...prev,
+        [vesselId]: [{ ...pos, vesselId }, ...(prev[vesselId] || [])],
+      }));
+      setShowManualModal(false);
+      return null;
+    }
+    const err = await res.json();
+    return err.error;
+  };
+
+  if (!isAuthed) return <LoginPage onLogin={handleLogin} />;
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -191,28 +227,43 @@ function App() {
         trackHours={trackHours}
         onTrackHoursChange={setTrackHours}
         onAddVessel={() => setShowAddModal(true)}
+        onManualEntry={() => setShowManualModal(true)}
         onDeleteVessel={handleDeleteVessel}
         onUpdateVessel={handleUpdateVessel}
         onSelectVessel={setSelectedVesselId}
         selectedVesselId={selectedVesselId}
         wsConnected={wsConnected}
+        onShowShare={() => setShowSharePanel(true)}
+        onLogout={handleLogout}
+        hiddenVessels={hiddenVessels}
+        onToggleVessel={handleToggleVessel}
+        showRestrictedZone={showRestrictedZone}
+        onToggleZone={handleToggleZone}
       />
 
-      <div className="flex-1 relative">
+      <div className="flex-1 relative mobile-map-wrapper">
         <Map
-          vessels={vessels}
+          vessels={vessels.filter(v => !hiddenVessels.has(v.id))}
           positions={positions}
           selectedVesselId={selectedVesselId}
           onSelectVessel={setSelectedVesselId}
+          showRestrictedZone={showRestrictedZone}
         />
+        <ReportTable vessels={vessels} positions={positions} />
       </div>
 
       {showAddModal && (
-        <AddVesselModal
-          onAdd={handleAddVessel}
-          onClose={() => setShowAddModal(false)}
-          existingCount={vessels.length}
+        <AddVesselModal onAdd={handleAddVessel} onClose={() => setShowAddModal(false)} existingCount={vessels.length} />
+      )}
+      {showSharePanel && (
+        <SharePanel
+          vessels={vessels}
+          apiFetch={apiFetch}
+          onClose={() => setShowSharePanel(false)}
         />
+      )}
+      {showManualModal && (
+        <ManualPositionModal vessels={vessels} onSave={handleManualPosition} onClose={() => setShowManualModal(false)} />
       )}
     </div>
   );

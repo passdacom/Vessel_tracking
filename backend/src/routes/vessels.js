@@ -1,83 +1,103 @@
-import { Router } from 'express';
-import { VESSEL_COLORS } from '../utils/colors.js';
+import { Router } from "express";
+import { VESSEL_COLORS } from "../utils/colors.js";
 
 export default function vesselRoutes(prisma) {
   const router = Router();
 
-  // List all vessels with latest position
-  router.get('/', async (req, res) => {
+  // List all vessels
+  router.get("/", async (req, res) => {
     try {
       const vessels = await prisma.vessel.findMany({
-        include: {
-          positions: {
-            orderBy: { timestamp: 'desc' },
-            take: 1,
-          },
-        },
-        orderBy: { createdAt: 'asc' },
+        include: { positions: { orderBy: { timestamp: "desc" }, take: 1 } },
+        orderBy: { createdAt: "asc" },
       });
       res.json(vessels);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // Get position history for a vessel
-  router.get('/:id/positions', async (req, res) => {
+  // Get position history
+  router.get("/:id/positions", async (req, res) => {
     try {
       const { id } = req.params;
       const hours = parseInt(req.query.hours) || 24;
       const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-
       const positions = await prisma.position.findMany({
-        where: {
-          vesselId: parseInt(id),
-          timestamp: { gte: since },
-        },
-        orderBy: { timestamp: 'desc' },
+        where: { vesselId: parseInt(id), timestamp: { gte: since } },
+        orderBy: { timestamp: "desc" },
         take: 2000,
       });
       res.json(positions);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // Add a vessel by MMSI
-  router.post('/', async (req, res) => {
+  // Manual position entry ← NEW
+  router.post("/:id/positions", async (req, res) => {
     try {
-      const { mmsi, alias, color } = req.body;
+      const { id } = req.params;
+      const { lat, lon, cog, sog, heading, timestamp } = req.body;
 
-      if (!mmsi || !/^\d{9}$/.test(mmsi)) {
-        return res.status(400).json({ error: '유효한 9자리 MMSI가 필요합니다' });
+      if (!lat || !lon) {
+        return res.status(400).json({ error: "Latitude and Longitude are required" });
       }
 
+      const vessel = await prisma.vessel.findUnique({ where: { id: parseInt(id) } });
+      if (!vessel) return res.status(404).json({ error: "Vessel not found" });
+
+      const position = await prisma.position.create({
+        data: {
+          vesselId: parseInt(id),
+          lat: parseFloat(lat),
+          lon: parseFloat(lon),
+          cog: cog != null ? parseFloat(cog) : null,
+          sog: sog != null ? parseFloat(sog) : null,
+          heading: heading != null ? parseFloat(heading) : null,
+          timestamp: timestamp ? new Date(timestamp) : new Date(),
+        },
+      });
+
+      console.log(`[Manual] Position added for vessel ${id}: ${lat},${lon}`);
+
+      req.app.locals.wsServer?.broadcast({
+        type: "position",
+        data: {
+          vesselId: vessel.id,
+          mmsi: vessel.mmsi,
+          name: vessel.name || vessel.alias,
+          ...position,
+        },
+      });
+
+      res.status(201).json(position);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
+  // Add vessel
+  router.post("/", async (req, res) => {
+    try {
+      const { mmsi, alias, color } = req.body;
+      if (!mmsi || !/^\d{9}$/.test(mmsi)) {
+        return res.status(400).json({ error: "Valid 9-digit MMSI required" });
+      }
       const existingCount = await prisma.vessel.count();
       const assignedColor = color || VESSEL_COLORS[existingCount % VESSEL_COLORS.length];
-
       const vessel = await prisma.vessel.create({
         data: { mmsi, alias: alias || null, color: assignedColor },
       });
-
       const allVessels = await prisma.vessel.findMany();
       req.app.locals.aisClient?.subscribe(allVessels.map(v => v.mmsi));
-      req.app.locals.wsServer?.broadcast({ type: 'vessel_added', data: vessel });
-
+      req.app.locals.wsServer?.broadcast({ type: "vessel_added", data: vessel });
       res.status(201).json(vessel);
     } catch (e) {
-      if (e.code === 'P2002') {
-        return res.status(409).json({ error: '이미 등록된 선박입니다' });
-      }
+      if (e.code === "P2002") return res.status(409).json({ error: "Vessel already registered" });
       res.status(500).json({ error: e.message });
     }
   });
 
-  // Update vessel alias or color
-  router.patch('/:id', async (req, res) => {
+  // Update vessel
+  router.patch("/:id", async (req, res) => {
     try {
       const { id } = req.params;
       const { alias, color } = req.body;
-
       const vessel = await prisma.vessel.update({
         where: { id: parseInt(id) },
         data: {
@@ -85,28 +105,21 @@ export default function vesselRoutes(prisma) {
           ...(color !== undefined && { color }),
         },
       });
-
-      req.app.locals.wsServer?.broadcast({ type: 'vessel_updated', data: vessel });
+      req.app.locals.wsServer?.broadcast({ type: "vessel_updated", data: vessel });
       res.json(vessel);
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // Delete a vessel
-  router.delete('/:id', async (req, res) => {
+  // Delete vessel
+  router.delete("/:id", async (req, res) => {
     try {
       const { id } = req.params;
       await prisma.vessel.delete({ where: { id: parseInt(id) } });
-
       const allVessels = await prisma.vessel.findMany();
       req.app.locals.aisClient?.subscribe(allVessels.map(v => v.mmsi));
-      req.app.locals.wsServer?.broadcast({ type: 'vessel_removed', data: { id: parseInt(id) } });
-
+      req.app.locals.wsServer?.broadcast({ type: "vessel_removed", data: { id: parseInt(id) } });
       res.json({ success: true });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   return router;

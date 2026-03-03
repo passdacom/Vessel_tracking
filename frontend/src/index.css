@@ -41,3 +41,61 @@
 .modal-overlay {
   z-index: 10000 !important;
 }
+
+/* ── Print / Report styles ──────────────────────────────── */
+@media print {
+  /* Hide sidebar, controls */
+  .print\\:hidden { display: none !important; }
+
+  /* Full width map area */
+  body { background: white; font-family: Arial, Helvetica, sans-serif; }
+
+  /* Report header */
+  .print-report-header {
+    display: block !important;
+    padding: 16px 24px;
+    border-bottom: 2px solid #1e3a5f;
+    margin-bottom: 16px;
+  }
+
+  /* Vessel summary table */
+  .print-report-table {
+    display: block !important;
+    width: 100%;
+    margin-top: 12px;
+    font-size: 11px;
+  }
+
+  .print-report-table table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .print-report-table th {
+    background: #1e3a5f;
+    color: white;
+    padding: 6px 8px;
+    text-align: left;
+    font-size: 10px;
+  }
+
+  .print-report-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid #ddd;
+    font-size: 10px;
+  }
+
+  .print-report-table tr:nth-child(even) td { background: #f5f5f5; }
+}
+
+/* Hidden in screen, visible in print */
+.print-report-header { display: none; }
+.print-report-table { display: none; }
+
+/* 모바일 레이아웃: 지도 상단 툴바 높이만큼 오프셋 */
+@media (max-width: 767px) {
+  .mobile-map-wrapper {
+    padding-top: 52px;
+    padding-bottom: 0;
+  }
+}

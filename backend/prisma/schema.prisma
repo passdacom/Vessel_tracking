@@ -30,3 +30,12 @@ model Position {
 
   @@index([vesselId, timestamp(sort: Desc)])
 }
+
+model SharedView {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  label     String
+  vesselIds String   // JSON array of vessel IDs e.g. "[3,4,5]"
+  createdAt DateTime @default(now())
+  expiresAt DateTime?
+}
