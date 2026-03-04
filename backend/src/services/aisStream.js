@@ -21,7 +21,7 @@ export function createAisClient(prisma, onPosition) {
       console.log("[AIS] Connected to AISStream.io");
       const subMsg = {
         Apikey: process.env.AISSTREAM_API_KEY,
-        BoundingBoxes: [[[-90, -180], [90, 180]]],
+        // BoundingBoxes removed to prevent 503 ban
         FiltersShipMMSI: mmsiList,
       };
       console.log("[AIS] Subscribing with " + mmsiList.length + " MMSIs");

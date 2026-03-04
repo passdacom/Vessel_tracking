@@ -8,25 +8,43 @@ datasource db {
 }
 
 model Vessel {
-  id        Int        @id @default(autoincrement())
-  mmsi      String     @unique
-  name      String?
-  alias     String?
-  color     String     @default("#3b82f6")
-  createdAt DateTime   @default(now())
-  positions Position[]
+  id           Int        @id @default(autoincrement())
+  mmsi         String     @unique
+  name         String?
+  alias        String?
+  color        String     @default("#3b82f6")
+  imo          String?
+  callsign     String?
+  countryIso   String?
+  countryName  String?
+  vesselType   String?
+  typeSpecific String?
+  grossTonnage Int?
+  deadweight   Int?
+  length       Float?
+  breadth      Float?
+  yearBuilt    String?
+  homePort     String?
+  speedAvg     Float?
+  speedMax     Float?
+  infoFetched  Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  positions    Position[]
 }
 
 model Position {
-  id        Int      @id @default(autoincrement())
-  vesselId  Int
-  vessel    Vessel   @relation(fields: [vesselId], references: [id], onDelete: Cascade)
-  lat       Float
-  lon       Float
-  cog       Float?
-  sog       Float?
-  heading   Int?
-  timestamp DateTime @default(now())
+  id          Int       @id @default(autoincrement())
+  vesselId    Int
+  vessel      Vessel    @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  lat         Float
+  lon         Float
+  cog         Float?
+  sog         Float?
+  heading     Int?
+  navStatus   String?
+  destination String?
+  eta         DateTime?
+  timestamp   DateTime  @default(now())
 
   @@index([vesselId, timestamp(sort: Desc)])
 }

@@ -5,6 +5,12 @@ const COLORS = [
   "#f97316","#06b6d4","#ec4899","#84cc16","#6366f1",
 ];
 
+// 국기 이모지 변환
+function flagEmoji(iso) {
+  if (!iso || iso.length !== 2) return "";
+  return String.fromCodePoint(...[...iso.toUpperCase()].map(c => 0x1F1E6 - 65 + c.charCodeAt(0)));
+}
+
 function timeAgo(ts) {
   const diff = Date.now() - new Date(ts);
   const m = Math.floor(diff / 60000);
@@ -15,8 +21,21 @@ function timeAgo(ts) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+function formatEta(eta) {
+  if (!eta) return null;
+  const d = new Date(eta);
+  if (isNaN(d)) return null;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false }) + " UTC";
+}
+
+function formatTonnage(n) {
+  if (!n) return "-";
+  return n.toLocaleString();
+}
+
 export default function VesselCard({ vessel, latestPosition, isSelected, onSelect, onDelete, onUpdate, isVisible = true, onToggleVisible }) {
   const [editing, setEditing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [alias, setAlias] = useState(vessel.alias || "");
   const [color, setColor] = useState(vessel.color);
 
@@ -62,15 +81,18 @@ export default function VesselCard({ vessel, latestPosition, isSelected, onSelec
   return (
     <div onClick={onSelect}
       className={`bg-gray-800 rounded-lg p-3 cursor-pointer transition-all border ${isSelected ? "border-blue-500 bg-gray-750" : "border-gray-700 hover:border-gray-500"}`} style={{ opacity: isVisible ? 1 : 0.45 }}>
+      {/* 헤더: 선박명 + 국기 + 버튼 */}
       <div className="flex items-center gap-2 mb-1">
         <div className="relative flex-shrink-0">
           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: vessel.color }} />
           {stale && <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />}
         </div>
-        <span className="text-white font-medium text-sm truncate flex-1">{displayName}</span>
+        <span className="text-white font-medium text-sm truncate flex-1">
+          {vessel.countryIso ? flagEmoji(vessel.countryIso) + " " : ""}{displayName}
+        </span>
         <div className="flex gap-0.5 flex-shrink-0">
           <button onClick={(e) => { e.stopPropagation(); onToggleVisible && onToggleVisible(); }}
-            className="p-1 text-gray-400 hover:text-white rounded transition" title={isVisible ? "지도에서 숨기기" : "지도에 표시"}>
+            className="p-1 text-gray-400 hover:text-white rounded transition" title={isVisible ? "Hide" : "Show"}>
             {isVisible
               ? <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
               : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{opacity:0.4}}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
@@ -90,20 +112,69 @@ export default function VesselCard({ vessel, latestPosition, isSelected, onSelec
           </button>
         </div>
       </div>
-      <div className="text-gray-500 text-xs mb-2 pl-5">MMSI: {vessel.mmsi}</div>
+
+      {/* 서브헤더: MMSI + 선종 */}
+      <div className="pl-5 text-xs text-gray-500 mb-1.5">
+        <span>MMSI: {vessel.mmsi}</span>
+        {vessel.typeSpecific && <span className="ml-1.5">· {vessel.typeSpecific}</span>}
+      </div>
+
       {latestPosition ? (
-        <div className="pl-5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
-          <span className="text-gray-400">Speed</span>
-          <span className="text-gray-200 font-medium">{latestPosition.sog?.toFixed(1) ?? "-"} kn</span>
-          <span className="text-gray-400">Course</span>
-          <span className="text-gray-200 font-medium">{latestPosition.cog?.toFixed(0) ?? "-"}°</span>
-          <span className="text-gray-500 col-span-2 mt-1">
+        <div className="pl-5 space-y-1">
+          {/* 속력/침로 */}
+          <div className="grid grid-cols-2 gap-x-3 text-xs">
+            <span className="text-gray-400">Speed</span>
+            <span className="text-gray-200 font-medium">{latestPosition.sog?.toFixed(1) ?? "-"} kn</span>
+            <span className="text-gray-400">Course</span>
+            <span className="text-gray-200 font-medium">{latestPosition.cog?.toFixed(0) ?? "-"}°</span>
+          </div>
+
+          {/* 목적지 + ETA */}
+          {(latestPosition.destination || latestPosition.eta) && (
+            <div className="text-xs border-t border-gray-700 pt-1 mt-1">
+              {latestPosition.destination && (
+                <div className="flex items-center gap-1">
+                  <span className="text-gray-500">📍 Dest:</span>
+                  <span className="text-blue-300 font-medium">{latestPosition.destination}</span>
+                </div>
+              )}
+              {latestPosition.eta && (
+                <div className="flex items-center gap-1">
+                  <span className="text-gray-500">⏱ ETA:</span>
+                  <span className="text-gray-300">{formatEta(latestPosition.eta)}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 상태 */}
+          <div className="text-xs">
             {stale ? (
               <span className="text-red-400">⚠ No signal · {lastSeen}</span>
             ) : (
               <span className="text-green-400">● Active · {lastSeen}</span>
             )}
-          </span>
+          </div>
+
+          {/* 선박 제원 확장 패널 (토글) */}
+          {(vessel.grossTonnage || vessel.imo) && (
+            <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+              className="text-xs text-gray-500 hover:text-gray-300 transition w-full text-left pt-0.5">
+              {expanded ? "▾ Hide details" : "▸ Vessel details"}
+            </button>
+          )}
+          {expanded && (
+            <div className="text-xs bg-gray-900 rounded p-2 space-y-0.5 border border-gray-700">
+              {vessel.imo && <div className="flex justify-between"><span className="text-gray-500">IMO</span><span className="text-gray-300">{vessel.imo}</span></div>}
+              {vessel.callsign && <div className="flex justify-between"><span className="text-gray-500">Callsign</span><span className="text-gray-300">{vessel.callsign}</span></div>}
+              {vessel.vesselType && <div className="flex justify-between"><span className="text-gray-500">Type</span><span className="text-gray-300">{vessel.vesselType}</span></div>}
+              {vessel.grossTonnage && <div className="flex justify-between"><span className="text-gray-500">GT</span><span className="text-gray-300">{formatTonnage(vessel.grossTonnage)}</span></div>}
+              {vessel.deadweight && <div className="flex justify-between"><span className="text-gray-500">DWT</span><span className="text-gray-300">{formatTonnage(vessel.deadweight)}</span></div>}
+              {vessel.yearBuilt && <div className="flex justify-between"><span className="text-gray-500">Built</span><span className="text-gray-300">{vessel.yearBuilt}</span></div>}
+              {vessel.homePort && <div className="flex justify-between"><span className="text-gray-500">Home Port</span><span className="text-gray-300">{vessel.homePort}</span></div>}
+              {vessel.countryName && <div className="flex justify-between"><span className="text-gray-500">Flag</span><span className="text-gray-300">{flagEmoji(vessel.countryIso)} {vessel.countryName}</span></div>}
+            </div>
+          )}
         </div>
       ) : (
         <div className="pl-5 text-xs text-gray-500 italic">Awaiting AIS signal...</div>
