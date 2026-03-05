@@ -55,6 +55,7 @@ export default function VesselCard({
   onSelect,
   onDelete,
   onUpdate,
+  onPan,
 }) {
   const [editing, setEditing] = useState(false);
   const [alias, setAlias] = useState(vessel.alias || vessel.name || '');
@@ -268,6 +269,19 @@ export default function VesselCard({
                   <span className="text-green-400">● 활성 · {lastSeen}</span>
                 )}
               </div>
+              {/* 지도로 이동 버튼 */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (onPan) onPan();
+                }}
+                className="mt-3 w-full py-1.5 bg-gray-700 hover:bg-blue-600 text-blue-300 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                </svg>
+                지도 위치로 이동
+              </button>
             </div>
           ) : (
             <div className="pl-5 text-xs text-gray-500 italic">
