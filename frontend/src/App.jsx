@@ -65,7 +65,7 @@ function App() {
   const [showManualModal, setShowManualModal] = useState(false);
   const [selectedVesselId, setSelectedVesselId] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(() => !!localStorage.getItem("vessel_auth"));
+  const [isAuthed, setIsAuthed] = useState(() => localStorage.getItem("vessel_auth") === "kb1234");
   const [showSharePanel, setShowSharePanel] = useState(false);
 
   const handleLogin = (pw) => {
@@ -85,6 +85,16 @@ function App() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const handleToggleAllVessels = () => {
+    if (hiddenVessels.size === vessels.length) {
+      // 모두 숨겨져 있으면 -> 모두 표시
+      setHiddenVessels(new Set());
+    } else {
+      // 하나라도 보이면 -> 전체 숨기기
+      setHiddenVessels(new Set(vessels.map(v => v.id)));
+    }
   };
 
   const handleToggleZone = () => setShowRestrictedZone(v => !v);
@@ -244,6 +254,7 @@ function App() {
         onLogout={handleLogout}
         hiddenVessels={hiddenVessels}
         onToggleVessel={handleToggleVessel}
+        onToggleAllVessels={handleToggleAllVessels}
         showRestrictedZone={showRestrictedZone}
         onToggleZone={handleToggleZone}
       />
