@@ -134,8 +134,8 @@ export default function VesselCard({
     <div
       onClick={onSelect}
       className={`bg-gray-800 rounded-lg p-3 cursor-pointer transition-all border ${isSelected
-          ? 'border-blue-500 bg-gray-750'
-          : 'border-gray-700 hover:border-gray-500'
+        ? 'border-blue-500 bg-gray-750'
+        : 'border-gray-700 hover:border-gray-500'
         }`}
     >
       {/* 헤더 행 */}
@@ -207,69 +207,74 @@ export default function VesselCard({
         </div>
       </div>
 
-      {/* 선박 유형 + MMSI */}
-      <div className="pl-5 flex items-center gap-2 mb-2 flex-wrap">
-        {vesselType && (
-          <span className="text-xs text-blue-400 font-medium">{vesselType}</span>
-        )}
-        {vesselType && <span className="text-gray-600 text-xs">·</span>}
-        <span className="text-gray-500 text-xs">MMSI {vessel.mmsi}</span>
-      </div>
-
-      {/* 위치 데이터 */}
-      {latestPosition ? (
-        <div className="pl-5 space-y-1">
-          {/* 속력 / 항로 */}
-          <div className="grid grid-cols-2 gap-x-3 text-xs">
-            <span className="text-gray-400">속력</span>
-            <span className="text-gray-200 font-medium">
-              {latestPosition.sog != null
-                ? `${latestPosition.sog.toFixed(1)} kn`
-                : '-'}
-            </span>
-            <span className="text-gray-400">항로</span>
-            <span className="text-gray-200 font-medium">
-              {latestPosition.cog != null
-                ? `${latestPosition.cog.toFixed(0)}°`
-                : '-'}
-            </span>
+      {/* 선박 상세 정보 (isSelected일 때만) */}
+      {isSelected && (
+        <>
+          {/* 선박 유형 + MMSI */}
+          <div className="pl-5 flex items-center gap-2 mb-2 flex-wrap">
+            {vesselType && (
+              <span className="text-xs text-blue-400 font-medium">{vesselType}</span>
+            )}
+            {vesselType && <span className="text-gray-600 text-xs">·</span>}
+            <span className="text-gray-500 text-xs">MMSI {vessel.mmsi}</span>
           </div>
 
-          {/* 목적지 + ETA */}
-          {destination && (
-            <div className="text-xs flex items-start gap-1 mt-0.5">
-              <span className="text-gray-400 flex-shrink-0">📍</span>
-              <div className="min-w-0">
-                <span className="text-gray-200">{destination}</span>
-                {eta && (
-                  <span className="text-gray-500"> · ⏱ {eta}</span>
+          {/* 위치 데이터 */}
+          {latestPosition ? (
+            <div className="pl-5 space-y-1">
+              {/* 속력 / 항로 */}
+              <div className="grid grid-cols-2 gap-x-3 text-xs">
+                <span className="text-gray-400">속력</span>
+                <span className="text-gray-200 font-medium">
+                  {latestPosition.sog != null
+                    ? `${latestPosition.sog.toFixed(1)} kn`
+                    : '-'}
+                </span>
+                <span className="text-gray-400">항로</span>
+                <span className="text-gray-200 font-medium">
+                  {latestPosition.cog != null
+                    ? `${latestPosition.cog.toFixed(0)}°`
+                    : '-'}
+                </span>
+              </div>
+
+              {/* 목적지 + ETA */}
+              {destination && (
+                <div className="text-xs flex items-start gap-1 mt-0.5">
+                  <span className="text-gray-400 flex-shrink-0">📍</span>
+                  <div className="min-w-0">
+                    <span className="text-gray-200">{destination}</span>
+                    {eta && (
+                      <span className="text-gray-500"> · ⏱ {eta}</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* GT + 건조년도 */}
+              {(gt || yearBuilt) && (
+                <div className="text-xs text-gray-500 flex gap-2 flex-wrap">
+                  {gt && <span>GT {gt}</span>}
+                  {gt && yearBuilt && <span>·</span>}
+                  {yearBuilt && <span>{yearBuilt}년 건조</span>}
+                </div>
+              )}
+
+              {/* 상태 표시 (마지막 줄) */}
+              <div className="text-xs mt-0.5">
+                {stale ? (
+                  <span className="text-red-400">⚠ 신호 없음 · {lastSeen}</span>
+                ) : (
+                  <span className="text-green-400">● 활성 · {lastSeen}</span>
                 )}
               </div>
             </div>
-          )}
-
-          {/* GT + 건조년도 */}
-          {(gt || yearBuilt) && (
-            <div className="text-xs text-gray-500 flex gap-2 flex-wrap">
-              {gt && <span>GT {gt}</span>}
-              {gt && yearBuilt && <span>·</span>}
-              {yearBuilt && <span>{yearBuilt}년 건조</span>}
+          ) : (
+            <div className="pl-5 text-xs text-gray-500 italic">
+              데이터 대기 중...
             </div>
           )}
-
-          {/* 상태 표시 (마지막 줄) */}
-          <div className="text-xs mt-0.5">
-            {stale ? (
-              <span className="text-red-400">⚠ 신호 없음 · {lastSeen}</span>
-            ) : (
-              <span className="text-green-400">● 활성 · {lastSeen}</span>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="pl-5 text-xs text-gray-500 italic">
-          데이터 대기 중...
-        </div>
+        </>
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Marker, Popup } from 'react-leaflet';
+import { Marker, Popup, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 
 function createShipIcon(color, rotation, isSelected) {
@@ -97,6 +97,9 @@ export default function VesselMarker({ vessel, position, isSelected, onClick }) 
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
+            <Tooltip permanent direction="right" offset={labelOffset || [0, -36]} className="bg-white border-0 shadow-sm px-1.5 py-0.5 rounded text-xs font-bold whitespace-nowrap opacity-80" interactive={false}>
+                <span style={{ color: '#1f2937' }}>{displayName}</span>
+            </Tooltip>
             <Popup>
                 <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>
                     {/* 선박명 헤더 */}

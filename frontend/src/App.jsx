@@ -64,6 +64,7 @@ function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
   const [selectedVesselId, setSelectedVesselId] = useState(null);
+  const [panTrigger, setPanTrigger] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
   const [isAuthed, setIsAuthed] = useState(() => localStorage.getItem("vessel_auth") === "kb1234");
   const [showSharePanel, setShowSharePanel] = useState(false);
@@ -137,10 +138,12 @@ function App() {
   );
 
   useEffect(() => {
+    if (!isAuthed) return;
     apiFetch("/vessels")
       .then((r) => r.json())
-      .then((data) => { setVessels(data); loadPositions(data); });
-  }, []); // eslint-disable-line
+      .then((data) => { setVessels(data); loadPositions(data); })
+      .catch(() => { });
+  }, [isAuthed, apiFetch]); // eslint-disable-line
 
   useEffect(() => {
     if (vessels.length === 0) return;
@@ -234,6 +237,14 @@ function App() {
     return err.error;
   };
 
+  const handleSelectVessel = (id) => {
+    if (selectedVesselId === id && id !== null) {
+      setPanTrigger((p) => p + 1);
+    } else {
+      setSelectedVesselId(id);
+    }
+  };
+
   if (!isAuthed) return <LoginPage onLogin={handleLogin} />;
 
   return (
@@ -247,7 +258,7 @@ function App() {
         onManualEntry={() => setShowManualModal(true)}
         onDeleteVessel={handleDeleteVessel}
         onUpdateVessel={handleUpdateVessel}
-        onSelectVessel={setSelectedVesselId}
+        onSelectVessel={handleSelectVessel}
         selectedVesselId={selectedVesselId}
         wsConnected={wsConnected}
         onShowShare={() => setShowSharePanel(true)}
@@ -264,7 +275,8 @@ function App() {
           vessels={vessels.filter(v => !hiddenVessels.has(v.id))}
           positions={positions}
           selectedVesselId={selectedVesselId}
-          onSelectVessel={setSelectedVesselId}
+          panTrigger={panTrigger}
+          onSelectVessel={handleSelectVessel}
           showRestrictedZone={showRestrictedZone}
         />
         <ReportTable vessels={vessels} positions={positions} />

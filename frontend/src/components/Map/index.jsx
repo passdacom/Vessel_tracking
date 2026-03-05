@@ -4,15 +4,15 @@ import VesselMarker, { OFFSETS } from "./VesselMarker.jsx";
 import VesselTrack from "./VesselTrack.jsx";
 import RestrictedZone from "./RestrictedZone.jsx";
 
-function MapController({ selectedVesselId, vessels, positions }) {
+function MapController({ selectedVesselId, panTrigger, vessels, positions }) {
   const map = useMap();
   useEffect(() => {
-    if (!selectedVesselId) return;
+    if (!selectedVesselId || panTrigger === 0) return;
     const vessel = vessels.find((v) => v.id === selectedVesselId);
     if (!vessel) return;
     const pos = positions[vessel.id]?.[0];
     if (pos) map.flyTo([pos.lat, pos.lon], Math.max(map.getZoom(), 10), { duration: 1.2 });
-  }, [selectedVesselId]); // eslint-disable-line
+  }, [panTrigger]); // eslint-disable-line
   return null;
 }
 
@@ -50,7 +50,7 @@ function computeLabelOffsets(vessels, positions) {
   return offsets;
 }
 
-export default function Map({ vessels, positions, selectedVesselId, onSelectVessel, showRestrictedZone = true }) {
+export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true }) {
   const labelOffsets = useMemo(
     () => computeLabelOffsets(vessels, positions),
     [vessels, positions]
@@ -64,7 +64,7 @@ export default function Map({ vessels, positions, selectedVesselId, onSelectVess
         subdomains="abcd"
         maxZoom={19}
       />
-      <MapController selectedVesselId={selectedVesselId} vessels={vessels} positions={positions} />
+      <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} />
       <RestrictedZone visible={showRestrictedZone} />
       {vessels.map((vessel) => {
         const vesselPositions = positions[vessel.id] || [];
