@@ -65,7 +65,7 @@ function App() {
   const [showManualModal, setShowManualModal] = useState(false);
   const [selectedVesselId, setSelectedVesselId] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(() => localStorage.getItem("vessel_auth") === "kb1234");
+  const [isAuthed, setIsAuthed] = useState(() => !!localStorage.getItem("vessel_auth"));
   const [showSharePanel, setShowSharePanel] = useState(false);
 
   const handleLogin = (pw) => {
@@ -165,7 +165,14 @@ function App() {
 
   useEffect(() => {
     const check = () => {
-      apiFetch("/health").then((r) => setWsConnected(r.ok)).catch(() => setWsConnected(false));
+      apiFetch("/health")
+        .then((r) => {
+          setWsConnected(r.ok);
+          if (r.status === 401) {
+            handleLogout();
+          }
+        })
+        .catch(() => setWsConnected(false));
     };
     check();
     const id = setInterval(check, 10000);
