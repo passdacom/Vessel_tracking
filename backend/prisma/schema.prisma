@@ -12,6 +12,7 @@ model Vessel {
   mmsi         String     @unique
   name         String?
   alias        String?
+  companyType  String     @default("자사간사")
   color        String     @default("#3b82f6")
   imo          String?
   callsign     String?
