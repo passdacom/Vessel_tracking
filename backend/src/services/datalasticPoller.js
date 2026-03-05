@@ -30,7 +30,8 @@ export function createDatalasticPoller(prisma, onPosition) {
     console.log(`[Datalastic] Fetching vessel_info for ${vessels.length} vessel(s)...`);
 
     for (const v of vessels) {
-      const res = await apiCall("vessel_info", { mmsi: v.mmsi });
+      const params = v.imo ? { imo: v.imo } : { mmsi: v.mmsi };
+      const res = await apiCall("vessel_info", params);
       if (!res?.data) continue;
       const d = res.data;
       await prisma.vessel.update({
@@ -66,9 +67,10 @@ export function createDatalasticPoller(prisma, onPosition) {
     console.log(`[Datalastic] 📡 Polling ${vessels.length} vessel(s) at ${now.toISOString()}`);
 
     for (const v of vessels) {
-      const res = await apiCall("vessel", { mmsi: v.mmsi });
+      const params = v.imo ? { imo: v.imo } : { mmsi: v.mmsi };
+      const res = await apiCall("vessel", params);
       if (!res?.data) {
-        console.log(`[Datalastic] ⚠ No data for MMSI ${v.mmsi}`);
+        console.log(`[Datalastic] ⚠ No data for ${v.imo ? 'IMO ' + v.imo : 'MMSI ' + v.mmsi}`);
         continue;
       }
       const d = res.data;

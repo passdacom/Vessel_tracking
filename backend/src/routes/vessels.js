@@ -84,7 +84,7 @@ export default function vesselRoutes(prisma) {
         data: { mmsi, alias: alias || null, color: assignedColor },
       });
       const allVessels = await prisma.vessel.findMany();
-      req.app.locals.aisClient?.subscribe(allVessels.map(v => v.mmsi));
+      
       req.app.locals.wsServer?.broadcast({ type: "vessel_added", data: vessel });
       res.status(201).json(vessel);
     } catch (e) {
@@ -116,7 +116,7 @@ export default function vesselRoutes(prisma) {
       const { id } = req.params;
       await prisma.vessel.delete({ where: { id: parseInt(id) } });
       const allVessels = await prisma.vessel.findMany();
-      req.app.locals.aisClient?.subscribe(allVessels.map(v => v.mmsi));
+      
       req.app.locals.wsServer?.broadcast({ type: "vessel_removed", data: { id: parseInt(id) } });
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }

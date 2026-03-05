@@ -6,8 +6,6 @@ import { PrismaClient } from "@prisma/client";
 import vesselRoutes from "./routes/vessels.js";
 import sharesRoutes from "./routes/shares.js";
 import { createWsServer } from "./services/wsServer.js";
-// Comment out AISStream Client
-// import { createAisClient } from "./services/aisStream.js";
 import { createDatalasticPoller } from "./services/datalasticPoller.js";
 import { startCleanupJob } from "./services/cleanup.js";
 
@@ -18,44 +16,38 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({ origin: true }));
 app.use(express.json());
 
+// 공유 링크는 인증 제외
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/shares")) return next();
+  if (!process.env.AUTH_PASSWORD) return next();
+  const token = req.headers.authorization?.split(" ")[1];
+  if (token === process.env.AUTH_PASSWORD) return next();
+  res.status(401).json({ error: "Unauthorized" });
+});
+
 app.use("/api/vessels", vesselRoutes(prisma));
 app.use("/api/shares", sharesRoutes(prisma));
-
-app.get("/api/health", (req, res) => {
-  const auth = (req.headers.authorization || "").replace("Bearer ", "");
-  if (auth === "kb1234") return res.json({ ok: true });
-  return res.status(401).json({ ok: false });
-});
+app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 const httpServer = createServer(app);
 const wsServer = createWsServer(httpServer);
 
-// AISStream client disabled due to 503 ban limits
-// const aisClient = createAisClient(prisma, (positionData) => { ... });
-
-// Initialize Datalastic Poller instead
+// Datalastic 폴러 초기화
 const datalasticPoller = createDatalasticPoller(prisma, (positionData) => {
   wsServer.broadcast({ type: "position", data: positionData });
 });
 
 async function init() {
-  const vessels = await prisma.vessel.findMany();
-  // app.locals.aisClient = aisClient;
+  // wsServer 노출 (라우터에서 브로드캐스트 가능하도록)
   app.locals.wsServer = wsServer;
 
-  // Datalastic polling start
-  if (vessels.length > 0) {
-    datalasticPoller.start();
-  }
-
-  // Old AISStream Start
-  // if (vessels.length > 0) { aisClient.subscribe(vessels.map(v => v.mmsi)); }
-
   startCleanupJob(prisma);
+  datalasticPoller.start();
 
+  const vessels = await prisma.vessel.findMany();
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log("Server running at http://0.0.0.0:" + PORT);
-    console.log("Tracking " + vessels.length + " vessel(s)");
+    console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
+    console.log(`📡 Tracking ${vessels.length} vessel(s) via Datalastic`);
   });
 }
 
@@ -65,7 +57,6 @@ init().catch((e) => {
 });
 
 process.on("SIGINT", async () => {
-  // aisClient.disconnect();
   datalasticPoller.stop();
   await prisma.$disconnect();
   process.exit(0);
