@@ -100,8 +100,13 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, la
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
-            <Tooltip permanent direction="right" offset={labelOffset || [0, -36]} className="bg-white border-0 shadow-sm px-1.5 py-0.5 rounded text-xs font-bold whitespace-nowrap opacity-80" interactive={false}>
-                <span style={{ color: '#1f2937' }}>{displayName}</span>
+            <Tooltip permanent direction="right" offset={labelOffset || [0, -36]} className="!bg-transparent !border-0 !shadow-none p-0 text-xs font-bold whitespace-nowrap" interactive={false} opacity={1}>
+                <span style={{
+                    color: vessel.color,
+                    textShadow: '-1px -1px 0px rgba(255,255,255,0.8), 1px -1px 0px rgba(255,255,255,0.8), -1px 1px 0px rgba(255,255,255,0.8), 1px 1px 0px rgba(255,255,255,0.8), 0px 0px 3px rgba(255,255,255,1)'
+                }}>
+                    {displayName}
+                </span>
             </Tooltip>
             <Popup>
                 <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>
