@@ -68,9 +68,12 @@ function formatEta(eta) {
     );
 }
 
-export const OFFSETS = { x: 0, y: 150 };
+export const OFFSETS = [
+    [0, -36], // 기본(위)
+    [0, 24]   // 클러스터시(아래)
+];
 
-export default function VesselMarker({ vessel, position, isSelected, onClick }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick, labelOffset }) {
     const rotation = position.heading ?? position.cog ?? 0;
 
     const icon = useMemo(
