@@ -2,12 +2,13 @@ import React, { useMemo } from 'react';
 import { Marker, Popup, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 
-function createShipIcon(color, rotation, isSelected) {
+function createShipIcon(color, rotation, isSelected, displayName) {
     const size = isSelected ? 34 : 26;
     const glow = isSelected
         ? `filter: drop-shadow(0 0 5px white) drop-shadow(0 0 10px ${color});`
         : '';
 
+    // 배 모양 SVG
     const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 28" width="${size}" height="${size}">
       <polygon
@@ -21,9 +22,36 @@ function createShipIcon(color, rotation, isSelected) {
     </svg>
   `;
 
+    // 🌟 핵심 해결책: CSS Mix-blend-mode 또는 background-color가 있는 커스텀 HTML 라벨을 마커 자체에 일체형으로 부착 (Tooltip 안씀)
+    const html = `
+      <div style="position: relative; width: ${size}px; height: ${size}px; transform: rotate(${rotation}deg); transform-origin: center; line-height: 0;">
+         ${svg}
+      </div>
+      <div style="
+         position: absolute;
+         left: ${size / 2}px;
+         top: 100%; 
+         transform: translate(-50%, 4px);
+         white-space: nowrap;
+         font-size: 11px;
+         font-weight: 800;
+         font-family: sans-serif;
+         color: ${color};
+         text-shadow: -1.5px -1.5px 0 rgba(255,255,255,0.9), 
+                       1.5px -1.5px 0 rgba(255,255,255,0.9), 
+                      -1.5px  1.5px 0 rgba(255,255,255,0.9), 
+                       1.5px  1.5px 0 rgba(255,255,255,0.9), 
+                       0     0     4px rgba(255,255,255,1);
+         pointer-events: none;
+         z-index: 1000;
+      ">
+        ${displayName}
+      </div>
+    `;
+
     return L.divIcon({
-        html: `<div style="transform: rotate(${rotation}deg); transform-origin: center; line-height: 0;">${svg}</div>`,
-        className: '',
+        html: html,
+        className: 'custom-vessel-icon',
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
         popupAnchor: [0, -(size / 2 + 4)],
@@ -68,20 +96,15 @@ function formatEta(eta) {
     );
 }
 
-export const OFFSETS = [
-    [0, -36], // 기본(위)
-    [0, 24]   // 클러스터시(아래)
-];
-
-export default function VesselMarker({ vessel, position, isSelected, onClick, direction = 'right', labelOffset = [0, -36] }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick }) {
     const rotation = position.heading ?? position.cog ?? 0;
+    const displayName = vessel.alias || vessel.name || vessel.mmsi;
 
     const icon = useMemo(
-        () => createShipIcon(vessel.color, rotation, isSelected),
-        [vessel.color, rotation, isSelected]
+        () => createShipIcon(vessel.color, rotation, isSelected, displayName),
+        [vessel.color, rotation, isSelected, displayName]
     );
 
-    const displayName = vessel.alias || vessel.name || vessel.mmsi;
     const flag = flagEmoji(vessel.countryIso);
     const vesselType = vessel.typeSpecific || vessel.vesselType;
     const destination = position.destination;
@@ -100,14 +123,6 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, di
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
-            <Tooltip permanent direction={direction} offset={labelOffset} className="!bg-transparent !border-0 !shadow-none p-0 text-xs font-bold whitespace-nowrap" interactive={false} opacity={1}>
-                <span style={{
-                    color: vessel.color,
-                    textShadow: '-1px -1px 0px rgba(255,255,255,0.8), 1px -1px 0px rgba(255,255,255,0.8), -1px 1px 0px rgba(255,255,255,0.8), 1px 1px 0px rgba(255,255,255,0.8), 0px 0px 3px rgba(255,255,255,1)'
-                }}>
-                    {displayName}
-                </span>
-            </Tooltip>
             <Popup>
                 <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>
                     {/* 선박명 헤더 */}
