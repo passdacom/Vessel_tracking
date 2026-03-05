@@ -73,7 +73,7 @@ export const OFFSETS = [
     [0, 24]   // 클러스터시(아래)
 ];
 
-export default function VesselMarker({ vessel, position, isSelected, onClick, labelOffset }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick, direction = 'right', labelOffset = [0, -36] }) {
     const rotation = position.heading ?? position.cog ?? 0;
 
     const icon = useMemo(
@@ -100,7 +100,7 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, la
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
-            <Tooltip permanent direction="right" offset={labelOffset || [0, -36]} className="!bg-transparent !border-0 !shadow-none p-0 text-xs font-bold whitespace-nowrap" interactive={false} opacity={1}>
+            <Tooltip permanent direction={direction} offset={labelOffset} className="!bg-transparent !border-0 !shadow-none p-0 text-xs font-bold whitespace-nowrap" interactive={false} opacity={1}>
                 <span style={{
                     color: vessel.color,
                     textShadow: '-1px -1px 0px rgba(255,255,255,0.8), 1px -1px 0px rgba(255,255,255,0.8), -1px 1px 0px rgba(255,255,255,0.8), 1px 1px 0px rgba(255,255,255,0.8), 0px 0px 3px rgba(255,255,255,1)'

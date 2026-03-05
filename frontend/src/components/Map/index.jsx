@@ -1,8 +1,45 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
-import VesselMarker, { OFFSETS } from "./VesselMarker.jsx";
+import VesselMarker from "./VesselMarker.jsx";
 import VesselTrack from "./VesselTrack.jsx";
 import RestrictedZone from "./RestrictedZone.jsx";
+
+// 줌 레벨에 기반하여 픽셀 거리로 겹침을 방지하도록 하는 자체 로직
+function computeDynamicOffsets(vessels, positions, zoom) {
+  const active = vessels
+    .map((v) => ({ vessel: v, pos: positions[v.id]?.[0] }))
+    .filter((x) => x.pos);
+
+  const offsets = {};
+  
+  // 기본값 설정 (우측)
+  active.forEach(({ vessel }) => {
+    offsets[vessel.id] = { direction: 'right', offset: [5, -40] };
+  });
+
+  // 아주 단순화된 충돌 감지 (위경도상 거리로 판별)
+  // zoom이 클수록(확대) 겹침 허용, 작을수록(축소) 겹침 방지 임계값 증가
+  const collisionThresholdDeg = 1.0 / Math.pow(2, Math.max(0, zoom - 5));
+  
+  // 간단하게 겹치는 쌍을 발견하면 한 쪽의 방향을 바꿈 (간이 로직)
+  for (let i = 0; i < active.length; i++) {
+    for (let j = i + 1; j < active.length; j++) {
+      const a = active[i];
+      const b = active[j];
+      const dlat = Math.abs(a.pos.lat - b.pos.lat);
+      const dlon = Math.abs(a.pos.lon - b.pos.lon);
+      
+      // 약간의 차이로 겹칠 경우 오프셋 방향 다르게
+      if (dlat < collisionThresholdDeg && dlon < collisionThresholdDeg) {
+         // a는 위쪽, b는 우하단으로 밀어냄
+         offsets[a.vessel.id] = { direction: 'top', offset: [0, -50] };
+         offsets[b.vessel.id] = { direction: 'bottom', offset: [0, -10] };
+         break; // 한 번 회피하면 다음 루프로
+      }
+    }
+  }
+  return offsets;
+}
 
 function MapController({ selectedVesselId, panTrigger, vessels, positions }) {
   const map = useMap();
@@ -16,48 +53,31 @@ function MapController({ selectedVesselId, panTrigger, vessels, positions }) {
   return null;
 }
 
-// 두 마커가 픽셀 공간에서 가까운지 판단 (위도/경도 거리 기반 근사)
-// deg_per_px: zoom 5 기준으로 약 0.01도 ≈ 1px 정도이므로 임계값을 0.8도로 설정
-const CLUSTER_THRESHOLD = 0.8;
-
-function computeLabelOffsets(vessels, positions) {
-  // 마커가 있는 선박만 추출
-  const active = vessels
-    .map((v) => ({ vessel: v, pos: positions[v.id]?.[0] }))
-    .filter((x) => x.pos);
-
-  const offsets = {};
-  // 초기 오프셋은 모두 위쪽(기본)
-  active.forEach(({ vessel }) => {
-    offsets[vessel.id] = OFFSETS[0];
-  });
-
-  // 두 선박이 서로 가까우면 겹치지 않게 오프셋 할당
-  for (let i = 0; i < active.length; i++) {
-    for (let j = i + 1; j < active.length; j++) {
-      const a = active[i];
-      const b = active[j];
-      const dlat = Math.abs(a.pos.lat - b.pos.lat);
-      const dlon = Math.abs(a.pos.lon - b.pos.lon);
-      if (dlat < CLUSTER_THRESHOLD && dlon < CLUSTER_THRESHOLD) {
-        // a는 위, b는 아래로
-        offsets[a.vessel.id] = OFFSETS[0]; // 위
-        offsets[b.vessel.id] = OFFSETS[1]; // 아래
-      }
-    }
-  }
-
-  return offsets;
+function ZoomListener({ setZoom }) {
+    const map = useMap();
+    useEffect(() => {
+        const onZoom = () => setZoom(map.getZoom());
+        map.on('zoomend', onZoom);
+        return () => map.off('zoomend', onZoom);
+    }, [map, setZoom]);
+    return null;
 }
 
 export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true }) {
+  const [zoom, setZoom] = useState(5);
+
   const labelOffsets = useMemo(
-    () => computeLabelOffsets(vessels, positions),
-    [vessels, positions]
+    () => computeDynamicOffsets(vessels, positions, zoom),
+    [vessels, positions, zoom]
   );
 
   return (
-    <MapContainer center={[25.0, 55.0]} zoom={5} style={{ height: "100%", width: "100%" }} zoomControl={true}>
+    <MapContainer 
+      center={[25.0, 55.0]} 
+      zoom={5} 
+      style={{ height: "100%", width: "100%" }} 
+      zoomControl={true}
+    >
       <TileLayer
         attribution="&copy; OpenStreetMap contributors &copy; CARTO"
         url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -66,9 +86,15 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
       />
       <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} />
       <RestrictedZone visible={showRestrictedZone} />
+      
+      {/* 줌 이벤트 리스너 */}
+      <ZoomListener setZoom={setZoom} />
+      
       {vessels.map((vessel) => {
         const vesselPositions = positions[vessel.id] || [];
         const latest = vesselPositions[0];
+        const layout = labelOffsets[vessel.id] || { direction: 'right', offset: [0, -36] };
+        
         return (
           <React.Fragment key={vessel.id}>
             <VesselTrack positions={vesselPositions} color={vessel.color} />
@@ -78,7 +104,8 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                 position={latest}
                 isSelected={selectedVesselId === vessel.id}
                 onClick={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
-                labelOffset={labelOffsets[vessel.id] || [0, -36]}
+                direction={layout.direction}
+                labelOffset={layout.offset}
               />
             )}
           </React.Fragment>
