@@ -1,20 +1,46 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+const AUTH_KEY = 'api_modal_auth_ts';   // localStorage 키
+const SESSION_TTL = 60 * 60 * 1000;    // 1시간 (ms)
+
+/** 인증 시각 저장 */
+function saveAuthTime() {
+    localStorage.setItem(AUTH_KEY, Date.now().toString());
+}
+
+/** 인증이 아직 유효한지 확인 */
+function isAuthValid() {
+    const ts = parseInt(localStorage.getItem(AUTH_KEY) || '0', 10);
+    return ts > 0 && (Date.now() - ts) < SESSION_TTL;
+}
+
 /**
  * API 수동 강제 수신 모달
- * - 비밀번호 인증 (880715)
+ * - 비밀번호 인증 (880715) — 1시간 세션 유지
  * - 전체 선박 또는 선택 선박만 갱신
  * - 실행 로그 터미널 뷰어
  */
 export default function ApiUpdateModal({ onClose, apiFetch, vessels = [] }) {
     const [password, setPassword] = useState('');
-    const [step, setStep] = useState('auth'); // auth | running | done | error
+    // 모달 열릴 때 localStorage 세션 유효성 확인 → 유효하면 'ready' 상태로 시작
+    const [step, setStep] = useState(() => isAuthValid() ? 'ready' : 'auth');
     const [logs, setLogs] = useState([]);
     const [errorMsg, setErrorMsg] = useState(null);
-    const [selectedMmsis, setSelectedMmsis] = useState(new Set()); // 빈 Set = 전체 갱신
-    const [updateMode, setUpdateMode] = useState('all'); // 'all' | 'selected'
+    const [selectedMmsis, setSelectedMmsis] = useState(new Set());
+    const [updateMode, setUpdateMode] = useState('all');
 
     const bottomRef = useRef(null);
+
+    // 1분마다 세션 만료 체크 (모달 열린 상태에서 시간 경과 시 자동 로그아웃)
+    useEffect(() => {
+        const timer = setInterval(() => {
+            if (step !== 'auth' && !isAuthValid()) {
+                setStep('auth');
+                setLogs([]);
+            }
+        }, 60_000);
+        return () => clearInterval(timer);
+    }, [step]);
 
     useEffect(() => {
         if (bottomRef.current) {
@@ -39,6 +65,17 @@ export default function ApiUpdateModal({ onClose, apiFetch, vessels = [] }) {
         if (typeof apiFetch !== 'function') {
             setErrorMsg('시스템 오류: apiFetch가 초기화되지 않았습니다. 페이지를 새로고침 해주세요.');
             return;
+        }
+
+        // 비밀번호 검증 (auth 단계에서만)
+        if (step === 'auth') {
+            if (password !== '880715') {
+                setErrorMsg('비밀번호가 올바르지 않습니다.');
+                setPassword('');
+                return;
+            }
+            // 인증 성공 → 시각 저장 (1시간 세션)
+            saveAuthTime();
         }
 
         setStep('running');
