@@ -1,28 +1,35 @@
 import React, { useMemo } from 'react';
-import { Marker, Popup, Tooltip } from 'react-leaflet';
+import { Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 
 function createShipIcon(color, rotation, isSelected, isStale) {
     const size = isSelected ? 34 : 26;
-    const glow = isSelected
-        ? `filter: drop-shadow(0 0 5px white) drop-shadow(0 0 10px ${color}) ${isStale ? 'grayscale(1) opacity(0.5)' : ''};`
-        : isStale ? `filter: grayscale(1) opacity(0.5);` : '';
+
+    // stale 선박은 회색으로 채우고 투명도 낮춤
+    const fillColor = isStale ? '#888888' : color;
+    const strokeColor = isStale ? '#aaaaaa' : 'white';
 
     const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 28" width="${size}" height="${size}">
       <polygon 
         points="12,2 21,24 12,19 3,24" 
-        fill="${color}" 
-        stroke="white" 
+        fill="${fillColor}" 
+        stroke="${strokeColor}" 
         stroke-width="1.5" 
         stroke-linejoin="round"
-        style="${glow}"
+        ${isSelected ? `filter="url(#sel-glow)"` : ''}
       />
+      ${isSelected ? `<defs><filter id="sel-glow"><feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="white" flood-opacity="0.8"/></filter></defs>` : ''}
     </svg>
   `;
 
+    // stale 선박: 전체 마커 div에 opacity 적용
+    const wrapperStyle = isStale
+        ? `transform: rotate(${rotation}deg); transform-origin: center; line-height: 0; opacity: 0.5;`
+        : `transform: rotate(${rotation}deg); transform-origin: center; line-height: 0;`;
+
     return L.divIcon({
-        html: `<div style="transform: rotate(${rotation}deg); transform-origin: center; line-height: 0;">${svg}</div>`,
+        html: `<div style="${wrapperStyle}">${svg}</div>`,
         className: 'custom-vessel-icon',
         iconSize: [size, size],
         iconAnchor: [size / 2, size / 2],
@@ -30,6 +37,7 @@ function createShipIcon(color, rotation, isSelected, isStale) {
         tooltipAnchor: [0, 0]
     });
 }
+
 
 function timeSince(timestamp) {
     const secs = Math.floor((Date.now() - new Date(timestamp)) / 1000);
@@ -59,7 +67,7 @@ function formatEta(eta) {
     );
 }
 
-export default function VesselMarker({ vessel, position, isSelected, onClick, direction = 'top', labelOffset = [0, -12], trackHours = 24 }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24 }) {
     const rotation = position.heading ?? position.cog ?? 0;
 
     const isStale = Date.now() - new Date(position.timestamp) > trackHours * 60 * 60 * 1000;
@@ -87,17 +95,14 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, di
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
-            <Tooltip permanent direction={direction} offset={labelOffset} className="!bg-transparent !border-0 !shadow-none p-0 text-xs font-bold whitespace-nowrap" interactive={false} opacity={isStale ? 0.6 : 1}>
-                <span style={{
-                    color: vessel.color,
-                    textShadow: '-1.5px -1.5px 0px rgba(255,255,255,0.9), 1.5px -1.5px 0px rgba(255,255,255,0.9), -1.5px 1.5px 0px rgba(255,255,255,0.9), 1.5px 1.5px 0px rgba(255,255,255,0.9), 0px 0px 4px rgba(255,255,255,1)',
-                    filter: isStale ? 'grayscale(1)' : 'none'
-                }}>
-                    {displayName}
-                </span>
-            </Tooltip>
             <Popup>
                 <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>
+                    {/* stale 배지 */}
+                    {isStale && (
+                        <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 6, padding: '4px 8px', marginBottom: 8, fontSize: 11, color: '#92400e' }}>
+                            ⚠ 조회 기간 내 데이터 없음 — 마지막 위치 표시 중
+                        </div>
+                    )}
                     {/* 선박명 헤더 */}
                     <div style={{ fontWeight: 'bold', fontSize: 15, color: vessel.color, marginBottom: 2 }}>
                         {displayName}

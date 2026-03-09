@@ -3,6 +3,54 @@ import cron from "node-cron";
 
 const API_BASE = "https://api.datalastic.com/api/v0";
 
+// ── AIS 스푸핑 탐지 설정 ──
+const MAX_SPEED_KNOTS = 25; // 최대 허용 속도 (knots) - 화물선/탱커 기준
+
+/**
+ * Haversine 공식으로 두 좌표 간 거리 계산 (km)
+ */
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // 지구 반지름 km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * AIS 스푸핑 의심 여부 판단
+ * @param {{lat, lon, timestamp}} prevPos - 직전 위치
+ * @param {number} newLat - 새 위도
+ * @param {number} newLon - 새 경도
+ * @param {Date}   newTime - 새 타임스탬프
+ * @returns {{ suspicious: boolean, impliedSpeed: number|null, reason: string|null }}
+ */
+function checkSpoofing(prevPos, newLat, newLon, newTime) {
+  if (!prevPos) return { suspicious: false, impliedSpeed: null, reason: null };
+
+  const distKm = haversineKm(prevPos.lat, prevPos.lon, newLat, newLon);
+  const distNm = distKm * 0.539957; // km → 해리
+  const elapsedHours = (new Date(newTime) - new Date(prevPos.timestamp)) / 3_600_000;
+
+  // 시간 차이가 0 이하면 무시
+  if (elapsedHours <= 0) return { suspicious: false, impliedSpeed: null, reason: null };
+
+  const impliedSpeed = distNm / elapsedHours; // knots
+
+  if (impliedSpeed > MAX_SPEED_KNOTS) {
+    return {
+      suspicious: true,
+      impliedSpeed: Math.round(impliedSpeed * 10) / 10,
+      reason: `차전 ${elapsedHours.toFixed(1)}시간 동안 ${distNm.toFixed(1)}nm 이동 (${impliedSpeed.toFixed(0)}kts > 허용차 ${MAX_SPEED_KNOTS}kts)`,
+    };
+  }
+
+  return { suspicious: false, impliedSpeed: Math.round(impliedSpeed * 10) / 10, reason: null };
+}
+
 // API 호출 헬퍼 (1 크레딧 소모)
 function apiCall(endpoint, params) {
   const apiKey = process.env.DATALASTIC_API_KEY;
@@ -100,6 +148,19 @@ export function createDatalasticPoller(prisma, onPosition) {
         continue;
       }
 
+      // ----- AIS 스푸핑 탐지 -----
+      const prevPos = await prisma.position.findFirst({
+        where: { vesselId: v.id, suspicious: false }, // 정상 위치만 기준
+        orderBy: { timestamp: 'desc' },
+        select: { lat: true, lon: true, timestamp: true },
+      });
+      const { suspicious, impliedSpeed, reason } = checkSpoofing(prevPos, lat, lon, timestamp);
+
+      if (suspicious) {
+        console.warn(`[Spoofing] ⚠ ${v.mmsi} (${v.name || v.alias}) 스푸핑 의심: ${reason}`);
+      }
+      // -------------------------
+
       const position = await prisma.position.create({
         data: {
           vesselId: v.id,
@@ -108,27 +169,38 @@ export function createDatalasticPoller(prisma, onPosition) {
           destination,
           eta,
           timestamp,
+          suspicious,
+          impliedSpeed,
+          spoofReason: reason,
         },
       });
 
-      console.log(`[Datalastic] ✅ ${v.mmsi} (${d.name || v.alias}) | ${lat.toFixed(4)},${lon.toFixed(4)} | SOG:${sog} | Dest:${destination} | ETA:${d.eta_UTC || "-"}`);
-
-      onPosition({
-        vesselId: v.id,
-        mmsi: v.mmsi,
-        name: d.name || v.name || v.alias,
-        ...position,
-      });
+      if (!suspicious) {
+        console.log(`[Datalastic] ✅ ${v.mmsi} (${d.name || v.alias}) | ${lat.toFixed(4)},${lon.toFixed(4)} | SOG:${sog} | Dest:${destination} | ETA:${d.eta_UTC || "-"}`);
+        onPosition({
+          vesselId: v.id,
+          mmsi: v.mmsi,
+          name: d.name || v.name || v.alias,
+          ...position,
+        });
+      }
     }
   }
 
   return {
-    async forceUpdate(logger) {
+    async forceUpdate(logger, mmsiList = null) {
       if (logger) logger("▶ 시작: 수동 강제 업데이트 작업을 시작합니다...");
-      const vessels = await prisma.vessel.findMany();
+      let vessels = await prisma.vessel.findMany();
       if (vessels.length === 0) {
         if (logger) logger("⚠ 등록된 선박이 없습니다.");
         return;
+      }
+
+      // mmsiList가 있으면 해당 선박만 필터링
+      if (mmsiList && mmsiList.length > 0) {
+        const mmsiSet = new Set(mmsiList.map(String));
+        vessels = vessels.filter(v => mmsiSet.has(String(v.mmsi)));
+        if (logger) logger(`⏩ 필터 적용: ${vessels.length}척 대상`);
       }
 
       const now = new Date();
@@ -179,6 +251,19 @@ export function createDatalasticPoller(prisma, onPosition) {
           await prisma.vessel.update({ where: { id: v.id }, data: { name: d.name } });
         }
 
+        // ----- AIS 스푸합 탐지 -----
+        const prevPosF = await prisma.position.findFirst({
+          where: { vesselId: v.id, suspicious: false },
+          orderBy: { timestamp: 'desc' },
+          select: { lat: true, lon: true, timestamp: true },
+        });
+        const { suspicious: susp, impliedSpeed: ispd, reason: sreason } = checkSpoofing(prevPosF, lat, lon, timestamp);
+
+        if (susp) {
+          if (logger) logger(`[Spoofing] ⚠ ${v.name || v.mmsi} 스푸핑 의심: ${sreason}`);
+        }
+        // -------------------------
+
         const position = await prisma.position.create({
           data: {
             vesselId: v.id,
@@ -187,18 +272,23 @@ export function createDatalasticPoller(prisma, onPosition) {
             destination,
             eta,
             timestamp,
+            suspicious: susp,
+            impliedSpeed: ispd,
+            spoofReason: sreason,
           },
         });
 
-        if (logger) logger(`[Datalastic] ✅ 갱신됨: ${d.name || v.alias || v.mmsi} | SOG:${sog} | 위치:${lat.toFixed(3)},${lon.toFixed(3)} | 시간:${timestamp.toISOString()}`);
+        if (logger) logger(`[Datalastic] ${susp ? '🚨 [Spoofing]' : '✅'} 갱신: ${d.name || v.alias || v.mmsi} | SOG:${sog} | 위치:${lat.toFixed(3)},${lon.toFixed(3)} | 시간:${timestamp.toISOString()}`);
         updatedCount++;
 
-        onPosition({
-          vesselId: v.id,
-          mmsi: v.mmsi,
-          name: d.name || v.name || v.alias,
-          ...position,
-        });
+        if (!susp) {
+          onPosition({
+            vesselId: v.id,
+            mmsi: v.mmsi,
+            name: d.name || v.name || v.alias,
+            ...position,
+          });
+        }
       }
 
       if (logger) logger(`▶ 종료: 수동 강제 업데이트 완료 (갱신 ${updatedCount}건, 스킵/오류 ${skippedCount}건)`);
