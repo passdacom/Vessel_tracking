@@ -21,16 +21,18 @@ export default function vesselRoutes(prisma) {
       const { id } = req.params;
       const hours = parseInt(req.query.hours) || 24;
       const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+      // suspicious=true인 스푸핑 의심 위치는 항적 트랙에서 제외
       let positions = await prisma.position.findMany({
-        where: { vesselId: parseInt(id), timestamp: { gte: since } },
+        where: { vesselId: parseInt(id), timestamp: { gte: since }, suspicious: false },
         orderBy: { timestamp: "desc" },
         take: 2000,
       });
 
-      // 만약 조회 기간 내 데이터가 하나도 없다면, 가장 최근 데이터 1건만 조회해서 포함
+      // 조회 기간 내 정상 데이터가 없으면 가장 최근 정상 위치 1건 fallback
       if (positions.length === 0) {
         const latest = await prisma.position.findFirst({
-          where: { vesselId: parseInt(id) },
+          where: { vesselId: parseInt(id), suspicious: false },
           orderBy: { timestamp: "desc" },
         });
         if (latest) {
@@ -125,11 +127,12 @@ export default function vesselRoutes(prisma) {
   // Delete vessel
   router.delete("/:id", async (req, res) => {
     try {
-      const { id } = req.params;
-      await prisma.vessel.delete({ where: { id: parseInt(id) } });
-      const allVessels = await prisma.vessel.findMany();
+      const id = parseInt(req.params.id);
+      // Position 레코드 먼저 삭제 (FK 제약 위반 방지)
+      await prisma.position.deleteMany({ where: { vesselId: id } });
+      await prisma.vessel.delete({ where: { id } });
 
-      req.app.locals.wsServer?.broadcast({ type: "vessel_removed", data: { id: parseInt(id) } });
+      req.app.locals.wsServer?.broadcast({ type: "vessel_removed", data: { id } });
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
