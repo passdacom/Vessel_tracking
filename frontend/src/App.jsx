@@ -261,6 +261,7 @@ function App() {
         onSelectVessel={handleSelectVessel}
         selectedVesselId={selectedVesselId}
         wsConnected={wsConnected}
+        apiFetch={apiFetch}
         onShowShare={() => setShowSharePanel(true)}
         onLogout={handleLogout}
         hiddenVessels={hiddenVessels}
