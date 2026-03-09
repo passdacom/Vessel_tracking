@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { GeoJSON, Tooltip } from "react-leaflet";
+import { GeoJSON } from "react-leaflet";
 
 /**
  * Persian Gulf + Gulf of Oman 제한 해역 오버레이
@@ -28,12 +28,6 @@ export default function RestrictedZone({ visible = true }) {
         fillColor: "#ef4444",
         fillOpacity: 0.15,
         dashArray: "6, 4",
-      }}
-      onEachFeature={(feature, layer) => {
-        layer.bindTooltip(
-          `<b>⚠️ War Risk Zone</b><br/>${feature.properties?.name || "Persian Gulf / Gulf of Oman"}`,
-          { sticky: true }
-        );
       }}
     />
   );

@@ -21,11 +21,23 @@ export default function vesselRoutes(prisma) {
       const { id } = req.params;
       const hours = parseInt(req.query.hours) || 24;
       const since = new Date(Date.now() - hours * 60 * 60 * 1000);
-      const positions = await prisma.position.findMany({
+      let positions = await prisma.position.findMany({
         where: { vesselId: parseInt(id), timestamp: { gte: since } },
         orderBy: { timestamp: "desc" },
         take: 2000,
       });
+
+      // 만약 조회 기간 내 데이터가 하나도 없다면, 가장 최근 데이터 1건만 조회해서 포함
+      if (positions.length === 0) {
+        const latest = await prisma.position.findFirst({
+          where: { vesselId: parseInt(id) },
+          orderBy: { timestamp: "desc" },
+        });
+        if (latest) {
+          positions = [latest];
+        }
+      }
+
       res.json(positions);
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
@@ -84,7 +96,7 @@ export default function vesselRoutes(prisma) {
         data: { mmsi, alias: alias || null, color: assignedColor },
       });
       const allVessels = await prisma.vessel.findMany();
-      
+
       req.app.locals.wsServer?.broadcast({ type: "vessel_added", data: vessel });
       res.status(201).json(vessel);
     } catch (e) {
@@ -116,7 +128,7 @@ export default function vesselRoutes(prisma) {
       const { id } = req.params;
       await prisma.vessel.delete({ where: { id: parseInt(id) } });
       const allVessels = await prisma.vessel.findMany();
-      
+
       req.app.locals.wsServer?.broadcast({ type: "vessel_removed", data: { id: parseInt(id) } });
       res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import VesselCard from "./VesselCard.jsx";
+import ApiUpdateModal from "../ApiUpdateModal.jsx";
 
 const TRACK_OPTIONS = [
     { label: "1h", value: 1 },
@@ -105,7 +106,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                 ) : (
                     <>
                         {myVessels.length > 0 && (
-                            <div className="space-y-2">
+                            <div className="space-y-1">
                                 <div className="flex items-center gap-1.5 px-1 pb-1 border-b border-gray-700">
                                     <div className="w-2 h-2 rounded-full bg-blue-500"></div>
                                     <h3 className="text-gray-300 text-xs font-bold tracking-wide uppercase">자사간사 ({myVessels.length})</h3>
@@ -141,6 +142,9 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                     Export / Print Report
                 </button>
                 <div className="flex gap-1 mt-2">
+                    <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} className="flex-1 py-1.5 bg-green-900 hover:bg-green-800 border border-green-700 text-green-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
+                        🔄 API 강제 수신
+                    </button>
                     <button onClick={onShowShare} className="flex-1 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
                         🔗 공유 링크
                     </button>
@@ -156,7 +160,8 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
 /* ── 모바일: 하단 드로어 ── */
 function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
     onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel,
-    onSelectVessel, selectedVesselId, wsConnected }) {
+    onSelectVessel, selectedVesselId, wsConnected,
+    hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels }) {
 
     const [open, setOpen] = useState(false);
 
@@ -175,7 +180,9 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
             onSelect={() => { onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id); setOpen(false); }}
             onDelete={() => onDeleteVessel(vessel.id)}
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
-            onPan={() => { onSelectVessel(vessel.id); setOpen(false); }} />
+            onPan={() => { onSelectVessel(vessel.id); setOpen(false); }}
+            isVisible={!hiddenVessels.has(vessel.id)}
+            onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)} />
     ));
 
     return (
@@ -245,6 +252,20 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                     </div>
                 </div>
 
+                {vessels.length > 0 && (
+                    <div style={{ padding: "8px 12px", borderBottom: "1px solid #374151", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+                        <button onClick={onToggleAllVessels} style={{
+                            background: hiddenVessels.size === vessels.length ? "#374151" : "#2563eb",
+                            color: "#fff", border: "none", borderRadius: 4, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer"
+                        }}>
+                            {hiddenVessels.size === vessels.length ? "전체 표시" : "전체 숨기기"}
+                        </button>
+                        <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                            {vessels.length - hiddenVessels.size}/{vessels.length} 표시중
+                        </span>
+                    </div>
+                )}
+
                 <div style={{ flex: 1, overflowY: "auto", padding: "12px 8px" }}>
                     {vessels.length === 0 ? (
                         <div style={{ textAlign: "center", color: "#6b7280", paddingTop: 24 }}>
@@ -279,12 +300,17 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                     )}
                 </div>
 
-                <div style={{ padding: "8px 12px", borderTop: "1px solid #374151", flexShrink: 0 }}>
+                <div style={{ padding: "8px 12px", borderTop: "1px solid #374151", flexShrink: 0, display: "flex", gap: "6px" }}>
                     <button onClick={() => window.print()} style={{
-                        width: "100%", padding: "8px", background: "#374151",
+                        flex: 1, padding: "8px", background: "#374151",
                         color: "#d1d5db", border: "none", borderRadius: 8,
                         fontSize: 12, fontWeight: 600, cursor: "pointer"
-                    }}>🖨 Export / Print Report</button>
+                    }}>🖨 Print</button>
+                    <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} style={{
+                        flex: 1, padding: "8px", background: "#065f46",
+                        color: "#6ee7b7", border: "1px solid #047857", borderRadius: 8,
+                        fontSize: 12, fontWeight: 600, cursor: "pointer"
+                    }}>🔄 강제 수신</button>
                 </div>
             </div>
         </>
@@ -294,6 +320,7 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
 /* ── 메인 export: 화면 너비에 따라 자동 분기 ── */
 export default function Sidebar(props) {
     const [isMobile, setIsMobile] = React.useState(window.innerWidth < 768);
+    const [showApiModal, setShowApiModal] = React.useState(false);
 
     React.useEffect(() => {
         const handler = () => setIsMobile(window.innerWidth < 768);
@@ -301,6 +328,26 @@ export default function Sidebar(props) {
         return () => window.removeEventListener("resize", handler);
     }, []);
 
-    if (isMobile) return <MobileDrawer {...props} />;
-    return <DesktopSidebar {...props} />;
+    React.useEffect(() => {
+        const handleOpenApiModal = () => setShowApiModal(true);
+        window.addEventListener('open-api-modal', handleOpenApiModal);
+        return () => window.removeEventListener('open-api-modal', handleOpenApiModal);
+    }, []);
+
+    // API 업데이트 완료 시 /positions 등을 다시 불러올 수 있도록 처리 필요 시 App.jsx의 apiFetch 사용
+    // 위 DesktopSidebar, MobileDrawer에서는 apiFetch 프롭스가 없어서
+    // App.jsx에서 관리하는 fetchPositions를 호출해야 하므로,
+    // 간단히 이벤트를 발생시키거나 모달 닫힐 때 새로고침 혹은 onRefresh prop 등을 부르면 됨.
+
+    return (
+        <>
+            {isMobile ? <MobileDrawer {...props} /> : <DesktopSidebar {...props} />}
+            {showApiModal && (
+                <ApiUpdateModal
+                    onClose={() => setShowApiModal(false)}
+                    apiFetch={props.apiFetch}
+                />
+            )}
+        </>
+    );
 }

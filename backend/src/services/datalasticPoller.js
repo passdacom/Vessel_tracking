@@ -123,19 +123,91 @@ export function createDatalasticPoller(prisma, onPosition) {
   }
 
   return {
+    async forceUpdate(logger) {
+      if (logger) logger("▶ 시작: 수동 강제 업데이트 작업을 시작합니다...");
+      const vessels = await prisma.vessel.findMany();
+      if (vessels.length === 0) {
+        if (logger) logger("⚠ 등록된 선박이 없습니다.");
+        return;
+      }
+
+      const now = new Date();
+      if (logger) logger(`[Datalastic] 📡 수동 폴링 시작 - ${vessels.length}척 | 대상시간: ${now.toISOString()}`);
+
+      let updatedCount = 0;
+      let skippedCount = 0;
+
+      for (const v of vessels) {
+        const params = v.imo ? { imo: v.imo } : { mmsi: v.mmsi };
+        const res = await apiCall("vessel", params);
+
+        if (!res?.data) {
+          if (logger) logger(`[Datalastic] ⚠ 데이터 없음: ${v.imo ? 'IMO ' + v.imo : 'MMSI ' + v.mmsi} (${v.name || v.alias || ''})`);
+          skippedCount++;
+          continue;
+        }
+
+        const d = res.data;
+        const lat = parseFloat(d.lat);
+        const lon = parseFloat(d.lon);
+        if (!lat && !lon) {
+          skippedCount++;
+          continue;
+        }
+
+        const cog = parseFloat(d.course) || null;
+        const sog = parseFloat(d.speed) || null;
+        const heading = d.heading != null && d.heading !== 511 ? parseInt(d.heading) : null;
+        const navStatus = d.navigation_status || null;
+        const destination = d.destination || null;
+        const eta = d.eta_UTC ? new Date(d.eta_UTC) : null;
+        const timestamp = d.last_position_epoch ? new Date(d.last_position_epoch * 1000) : new Date();
+
+        // 동일 타임스탬프 중복 방지
+        const existing = await prisma.position.findFirst({
+          where: { vesselId: v.id, timestamp },
+        });
+
+        if (existing) {
+          if (logger) logger(`[Datalastic] ⏩ 중복 스킵: ${v.name || v.mmsi} - ${timestamp.toISOString()} 데이터 이미 존재`);
+          skippedCount++;
+          continue;
+        }
+
+        // 이름 업데이트
+        if (d.name && !v.name) {
+          await prisma.vessel.update({ where: { id: v.id }, data: { name: d.name } });
+        }
+
+        const position = await prisma.position.create({
+          data: {
+            vesselId: v.id,
+            lat, lon, cog, sog, heading,
+            navStatus,
+            destination,
+            eta,
+            timestamp,
+          },
+        });
+
+        if (logger) logger(`[Datalastic] ✅ 갱신됨: ${d.name || v.alias || v.mmsi} | SOG:${sog} | 위치:${lat.toFixed(3)},${lon.toFixed(3)} | 시간:${timestamp.toISOString()}`);
+        updatedCount++;
+
+        onPosition({
+          vesselId: v.id,
+          mmsi: v.mmsi,
+          name: d.name || v.name || v.alias,
+          ...position,
+        });
+      }
+
+      if (logger) logger(`▶ 종료: 수동 강제 업데이트 완료 (갱신 ${updatedCount}건, 스킵/오류 ${skippedCount}건)`);
+    },
     start() {
       // 서버 시작 시 즉시 1회 실행
       fetchVesselInfo().then(() => pollPositions());
 
       // KST 기준 00, 08, 13, 15, 17, 20시에 폴링 (UTC: 15, 23, 04, 06, 08, 11)
-      // node-cron은 서버 시스템 시간을 따르므로, 서버가 UTC라면 UTC로 변환
-      // KST = UTC + 9
-      // 00:00 KST = 15:00 UTC (전일)
-      // 08:00 KST = 23:00 UTC (전일)
-      // 13:00 KST = 04:00 UTC
-      // 15:00 KST = 06:00 UTC
-      // 17:00 KST = 08:00 UTC
-      // 20:00 KST = 11:00 UTC
       const cronExpr = "0 4,6,8,11,15,23 * * *"; // UTC 시간 기준
       const task = cron.schedule(cronExpr, () => {
         pollPositions();

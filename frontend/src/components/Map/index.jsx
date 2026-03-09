@@ -87,7 +87,7 @@ function ZoomListener({ setZoom }) {
     return null;
 }
 
-export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true }) {
+export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true, trackHours }) {
     const [zoom, setZoom] = useState(5);
 
     const labelOffsets = useMemo(
@@ -129,6 +129,7 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                                 onClick={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
                                 direction={layout.direction}
                                 labelOffset={layout.offset}
+                                trackHours={trackHours}
                             />
                         )}
                     </React.Fragment>

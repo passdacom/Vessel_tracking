@@ -2,11 +2,11 @@ import React, { useMemo } from 'react';
 import { Marker, Popup, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 
-function createShipIcon(color, rotation, isSelected) {
+function createShipIcon(color, rotation, isSelected, isStale) {
     const size = isSelected ? 34 : 26;
     const glow = isSelected
-        ? `filter: drop-shadow(0 0 5px white) drop-shadow(0 0 10px ${color});`
-        : '';
+        ? `filter: drop-shadow(0 0 5px white) drop-shadow(0 0 10px ${color}) ${isStale ? 'grayscale(1) opacity(0.5)' : ''};`
+        : isStale ? `filter: grayscale(1) opacity(0.5);` : '';
 
     const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 28" width="${size}" height="${size}">
@@ -41,17 +41,7 @@ function timeSince(timestamp) {
     return `${Math.floor(hours / 24)}일 전`;
 }
 
-function flagEmoji(iso) {
-    if (!iso) return '';
-    try {
-        const codePoints = [...iso.toUpperCase()].map(
-            (c) => 0x1f1e6 + c.charCodeAt(0) - 65
-        );
-        return String.fromCodePoint(...codePoints);
-    } catch {
-        return '';
-    }
-}
+// 국기 이모지 파싱 삭제
 
 function formatEta(eta) {
     if (!eta) return null;
@@ -69,16 +59,17 @@ function formatEta(eta) {
     );
 }
 
-export default function VesselMarker({ vessel, position, isSelected, onClick, direction = 'top', labelOffset = [0, -12] }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick, direction = 'top', labelOffset = [0, -12], trackHours = 24 }) {
     const rotation = position.heading ?? position.cog ?? 0;
 
+    const isStale = Date.now() - new Date(position.timestamp) > trackHours * 60 * 60 * 1000;
+
     const icon = useMemo(
-        () => createShipIcon(vessel.color, rotation, isSelected),
-        [vessel.color, rotation, isSelected]
+        () => createShipIcon(vessel.color, rotation, isSelected, isStale),
+        [vessel.color, rotation, isSelected, isStale]
     );
 
     const displayName = vessel.alias || vessel.name || vessel.mmsi;
-    const flag = flagEmoji(vessel.countryIso);
     const vesselType = vessel.typeSpecific || vessel.vesselType;
     const destination = position.destination;
     const eta = position.eta ? formatEta(position.eta) : null;
@@ -96,10 +87,11 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, di
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
-            <Tooltip permanent direction={direction} offset={labelOffset} className="!bg-transparent !border-0 !shadow-none p-0 text-xs font-bold whitespace-nowrap" interactive={false} opacity={1}>
+            <Tooltip permanent direction={direction} offset={labelOffset} className="!bg-transparent !border-0 !shadow-none p-0 text-xs font-bold whitespace-nowrap" interactive={false} opacity={isStale ? 0.6 : 1}>
                 <span style={{
                     color: vessel.color,
-                    textShadow: '-1.5px -1.5px 0px rgba(255,255,255,0.9), 1.5px -1.5px 0px rgba(255,255,255,0.9), -1.5px 1.5px 0px rgba(255,255,255,0.9), 1.5px 1.5px 0px rgba(255,255,255,0.9), 0px 0px 4px rgba(255,255,255,1)'
+                    textShadow: '-1.5px -1.5px 0px rgba(255,255,255,0.9), 1.5px -1.5px 0px rgba(255,255,255,0.9), -1.5px 1.5px 0px rgba(255,255,255,0.9), 1.5px 1.5px 0px rgba(255,255,255,0.9), 0px 0px 4px rgba(255,255,255,1)',
+                    filter: isStale ? 'grayscale(1)' : 'none'
                 }}>
                     {displayName}
                 </span>
@@ -108,7 +100,6 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, di
                 <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>
                     {/* 선박명 헤더 */}
                     <div style={{ fontWeight: 'bold', fontSize: 15, color: vessel.color, marginBottom: 2 }}>
-                        {flag && <span style={{ marginRight: 6 }}>{flag}</span>}
                         {displayName}
                     </div>
 

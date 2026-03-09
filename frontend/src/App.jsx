@@ -278,6 +278,7 @@ function App() {
           panTrigger={panTrigger}
           onSelectVessel={handleSelectVessel}
           showRestrictedZone={showRestrictedZone}
+          trackHours={trackHours}
         />
         <ReportTable vessels={vessels} positions={positions} />
       </div>

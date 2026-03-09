@@ -1,17 +1,6 @@
 import React, { useState } from 'react';
 
-// ISO 국가 코드 → 국기 이모지 변환
-function flagEmoji(iso) {
-    if (!iso) return '';
-    try {
-        const codePoints = [...iso.toUpperCase()].map(
-            (c) => 0x1f1e6 + c.charCodeAt(0) - 65
-        );
-        return String.fromCodePoint(...codePoints);
-    } catch {
-        return '';
-    }
-}
+// 국기 이모지 변환 (사용하지 않으므로 삭제 처리)
 
 // ETA 포맷: 'Mar 02, 14:30 UTC' 형태
 function formatEta(eta) {
@@ -56,6 +45,8 @@ export default function VesselCard({
     onDelete,
     onUpdate,
     onPan,
+    isVisible = true,
+    onToggleVisible,
 }) {
     const [editing, setEditing] = useState(false);
     const [alias, setAlias] = useState(vessel.alias || vessel.name || '');
@@ -68,9 +59,7 @@ export default function VesselCard({
     const lastSeen = latestPosition ? lastSeenText(latestPosition.timestamp) : null;
 
     // 확장 필드
-    const flag = flagEmoji(vessel.countryIso);
     const vesselType = vessel.typeSpecific || vessel.vesselType || null;
-    const companyType = vessel.companyType || '자사간사';
     const destination = latestPosition?.destination || null;
     const eta = latestPosition?.eta ? formatEta(latestPosition.eta) : null;
     const gt = vessel.grossTonnage ? vessel.grossTonnage.toLocaleString() : null;
@@ -135,81 +124,54 @@ export default function VesselCard({
     return (
         <div
             onClick={onSelect}
-            className={`bg-gray-800 rounded-lg p-3 cursor-pointer transition-all border ${isSelected
+            className={`bg-gray-800 rounded-lg py-1.5 px-3 cursor-pointer transition-all border ${isSelected
                 ? 'border-blue-500 bg-gray-750'
                 : 'border-gray-700 hover:border-gray-500'
-                }`}
+                } ${!isVisible ? 'opacity-40 grayscale' : ''}`}
         >
             {/* 헤더 행 */}
-            <div className="flex items-center gap-2 mb-1">
-                {/* 색상 점 + stale 인디케이터 */}
+            <div className="flex items-center gap-2">
+                {/* 색상 점 */}
                 <div className="relative flex-shrink-0">
                     <div
-                        className="w-3 h-3 rounded-full"
+                        className="w-2.5 h-2.5 rounded-full"
                         style={{ backgroundColor: vessel.color }}
                     />
-                    {stale && (
-                        <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
-                    )}
                 </div>
 
-                {/* 선박명 + 국기 */}
-                <span className="text-white font-semibold text-sm truncate flex-1 tracking-tight">
-                    {flag && <span className="mr-1">{flag}</span>}
-                    {displayName}
-                </span>
+                {/* 선박명 + 숨기기 버튼 */}
+                <div className="flex-1 flex items-center min-w-0 pr-1">
+                    <span className="text-white font-semibold text-sm truncate tracking-tight mr-1">
+                        {displayName}
+                    </span>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            if (onToggleVisible) onToggleVisible();
+                        }}
+                        className={`p-0.5 rounded transition flex-shrink-0 ${isVisible ? 'text-blue-400 hover:text-blue-300' : 'text-gray-500 hover:text-gray-400'}`}
+                        title={isVisible ? "이 선박 숨기기" : "이 선박 표시하기"}
+                    >
+                        {isVisible ? (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                        ) : (
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
+                        )}
+                    </button>
+                </div>
 
-                {/* 소속 뱃지 */}
-                <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 font-bold ${companyType === '타사간사' ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-800' : 'bg-blue-900/50 text-blue-400 border border-blue-800'
-                    }`}>
-                    {companyType === '타사간사' ? '타사' : '자사'}
-                </span>
-
-                {/* 편집/삭제 버튼 */}
-                <div className="flex gap-0.5 flex-shrink-0 ml-1">
+                {/* 편집 버튼 */}
+                <div className="flex flex-shrink-0 ml-1">
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
                             setEditing(true);
                         }}
-                        className="p-1 text-gray-400 hover:text-white rounded transition"
+                        className="p-0.5 text-gray-400 hover:text-white rounded transition"
                         title="편집"
                     >
-                        <svg
-                            className="w-3.5 h-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                            />
-                        </svg>
-                    </button>
-                    <button
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            if (window.confirm(`"${displayName}"을 삭제하시겠습니까?`))
-                                onDelete();
-                        }}
-                        className="p-1 text-gray-400 hover:text-red-400 rounded transition"
-                        title="삭제"
-                    >
-                        <svg
-                            className="w-3.5 h-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                        >
-                            <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                     </button>
                 </div>
@@ -276,19 +238,35 @@ export default function VesselCard({
                                     <span className="text-green-400">● 활성 · {lastSeen}</span>
                                 )}
                             </div>
-                            {/* 지도로 이동 버튼 */}
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    if (onPan) onPan();
-                                }}
-                                className="mt-3 w-full py-1.5 bg-gray-700 hover:bg-blue-600 text-blue-300 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                                </svg>
-                                지도 위치로 이동
-                            </button>
+                            {/* 하단 버튼 그룹 (지도로 이동 + 삭제) */}
+                            <div className="mt-3 flex gap-2">
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onPan) onPan();
+                                    }}
+                                    className="flex-1 py-1.5 bg-gray-700 hover:bg-blue-600 text-blue-300 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                                    </svg>
+                                    이동
+                                </button>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (window.confirm(`"${displayName}"을 반환(삭제)하시겠습니까?`))
+                                            onDelete();
+                                    }}
+                                    className="py-1.5 px-3 bg-gray-700 hover:bg-red-600 text-gray-400 hover:text-white text-xs rounded transition flex items-center justify-center border border-gray-600 hover:border-red-500"
+                                    title="이 선박 삭제"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                    삭제
+                                </button>
+                            </div>
                         </div>
                     ) : (
                         <div className="pl-5 text-xs text-gray-500 italic">
