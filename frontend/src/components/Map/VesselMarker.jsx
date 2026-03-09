@@ -96,82 +96,98 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, di
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
-            <Tooltip permanent direction={direction} offset={labelOffset} className="!bg-transparent !border-0 !shadow-none p-0 text-[10px] font-bold whitespace-nowrap" interactive={false} opacity={1}>
+            <Tooltip permanent direction={direction} offset={labelOffset} className="!bg-transparent !border-0 !shadow-none p-0 text-xs font-bold whitespace-nowrap" interactive={false} opacity={1}>
                 <span style={{
-                    color: '#fff',
-                    textShadow: `0 0 4px ${vessel.color}, 0 0 10px ${vessel.color}, 0 0 15px ${vessel.color}, 0px 1px 3px rgba(0,0,0,0.8)`
+                    color: vessel.color,
+                    textShadow: '-1.5px -1.5px 0px rgba(255,255,255,0.9), 1.5px -1.5px 0px rgba(255,255,255,0.9), -1.5px 1.5px 0px rgba(255,255,255,0.9), 1.5px 1.5px 0px rgba(255,255,255,0.9), 0px 0px 4px rgba(255,255,255,1)'
                 }}>
                     {displayName}
                 </span>
             </Tooltip>
-            <Popup className="glass-popup">
-                <div style={{ minWidth: 220, fontFamily: 'sans-serif', background: '#0F172A', color: '#e2e8f0', padding: '12px', borderRadius: '8px', border: '1px solid #334155' }}>
+            <Popup>
+                <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>
                     {/* 선박명 헤더 */}
-                    <div style={{ fontWeight: 900, fontSize: 16, color: '#fff', marginBottom: 4, letterSpacing: '0.05em' }}>
+                    <div style={{ fontWeight: 'bold', fontSize: 15, color: vessel.color, marginBottom: 2 }}>
                         {flag && <span style={{ marginRight: 6 }}>{flag}</span>}
                         {displayName}
                     </div>
 
                     {/* 선박 유형 */}
                     {vesselType && (
-                        <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6 }}>
                             {vesselType}
-                            {vessel.yearBuilt && ` · BUILD ${vessel.yearBuilt}`}
+                            {vessel.yearBuilt && ` · ${vessel.yearBuilt}년 건조`}
                         </div>
                     )}
 
-                    <div style={{ borderTop: '1px solid #334155', margin: '8px 0' }} />
+                    <div style={divider} />
 
                     {/* 항해 정보 */}
-                    <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '11px' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                         <tbody>
                             <tr>
-                                <td style={{ color: '#64748b', paddingBottom: 4 }}>SPEED</td>
-                                <td style={{ fontWeight: 600, color: '#f8fafc', paddingBottom: 4 }}>{position.sog != null ? `${position.sog.toFixed(1)} KTS` : '-'}</td>
+                                <td style={labelStyle}>속력</td>
+                                <td style={valueStyle}>{position.sog != null ? `${position.sog.toFixed(1)} kn` : '-'}</td>
                             </tr>
                             <tr>
-                                <td style={{ color: '#64748b', paddingBottom: 4 }}>HEADING</td>
-                                <td style={{ fontWeight: 600, color: '#f8fafc', paddingBottom: 4 }}>{position.cog != null ? `${position.cog.toFixed(0)}°` : '-'}</td>
+                                <td style={labelStyle}>항로 (COG)</td>
+                                <td style={valueStyle}>{position.cog != null ? `${position.cog.toFixed(0)}°` : '-'}</td>
+                            </tr>
+                            <tr>
+                                <td style={labelStyle}>선수 (HDG)</td>
+                                <td style={valueStyle}>
+                                    {position.heading != null ? `${position.heading}°` : '-'}
+                                </td>
                             </tr>
                             {destination && (
                                 <tr>
-                                    <td style={{ color: '#64748b', paddingBottom: 4 }}>DEST</td>
-                                    <td style={{ fontWeight: 600, color: '#f8fafc', paddingBottom: 4 }}>{destination}</td>
+                                    <td style={labelStyle}>목적지</td>
+                                    <td style={valueStyle}>{destination}</td>
                                 </tr>
                             )}
                             {eta && (
                                 <tr>
-                                    <td style={{ color: '#64748b', paddingBottom: 4 }}>ETA</td>
-                                    <td style={{ fontWeight: 600, color: '#38bdf8', paddingBottom: 4 }}>{eta}</td>
+                                    <td style={labelStyle}>ETA</td>
+                                    <td style={{ ...valueStyle, color: '#3b82f6' }}>{eta}</td>
                                 </tr>
                             )}
                         </tbody>
                     </table>
 
-                    <div style={{ borderTop: '1px solid #334155', margin: '8px 0' }} />
+                    <div style={divider} />
 
                     {/* 선박 제원 */}
-                    <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '11px' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                         <tbody>
                             {vessel.imo && (
                                 <tr>
-                                    <td style={{ color: '#64748b', paddingBottom: 4 }}>IMO</td>
-                                    <td style={{ fontWeight: 600, color: '#f8fafc', paddingBottom: 4 }}>{vessel.imo}</td>
+                                    <td style={labelStyle}>IMO</td>
+                                    <td style={valueStyle}>{vessel.imo}</td>
                                 </tr>
                             )}
                             {gt && (
                                 <tr>
-                                    <td style={{ color: '#64748b', paddingBottom: 4 }}>GT</td>
-                                    <td style={{ fontWeight: 600, color: '#f8fafc', paddingBottom: 4 }}>{gt}</td>
+                                    <td style={labelStyle}>총톤수 (GT)</td>
+                                    <td style={valueStyle}>{gt}</td>
+                                </tr>
+                            )}
+                            {vessel.deadweight && (
+                                <tr>
+                                    <td style={labelStyle}>재화중량 (DWT)</td>
+                                    <td style={valueStyle}>{vessel.deadweight.toLocaleString()}</td>
                                 </tr>
                             )}
                             <tr>
-                                <td style={{ color: '#64748b', paddingBottom: 4 }}>LAT / LON</td>
-                                <td style={{ fontWeight: 600, color: '#f8fafc', paddingBottom: 4 }}>{position.lat.toFixed(5)}°N, {position.lon.toFixed(5)}°E</td>
+                                <td style={labelStyle}>위도</td>
+                                <td style={valueStyle}>{position.lat.toFixed(5)}°N</td>
                             </tr>
                             <tr>
-                                <td style={{ color: '#64748b' }}>LAST SEEN</td>
-                                <td style={{ fontWeight: 600, color: '#ef4444' }}>{timeSince(position.timestamp)}</td>
+                                <td style={labelStyle}>경도</td>
+                                <td style={valueStyle}>{position.lon.toFixed(5)}°E</td>
+                            </tr>
+                            <tr>
+                                <td style={labelStyle}>업데이트</td>
+                                <td style={valueStyle}>{timeSince(position.timestamp)}</td>
                             </tr>
                         </tbody>
                     </table>
