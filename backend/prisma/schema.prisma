@@ -34,18 +34,21 @@ model Vessel {
 }
 
 model Position {
-  id          Int       @id @default(autoincrement())
-  vesselId    Int
-  vessel      Vessel    @relation(fields: [vesselId], references: [id], onDelete: Cascade)
-  lat         Float
-  lon         Float
-  cog         Float?
-  sog         Float?
-  heading     Int?
-  navStatus   String?
-  destination String?
-  eta         DateTime?
-  timestamp   DateTime  @default(now())
+  id           Int       @id @default(autoincrement())
+  vesselId     Int
+  vessel       Vessel    @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  lat          Float
+  lon          Float
+  cog          Float?
+  sog          Float?
+  heading      Int?
+  navStatus    String?
+  destination  String?
+  eta          DateTime?
+  timestamp    DateTime  @default(now())
+  suspicious   Boolean   @default(false)   // 스푸핑 의심 플래그
+  impliedSpeed Float?                      // 계산된 신호 속도 (knots)
+  spoofReason  String?                     // 의심 이유 메시지
 
   @@index([vesselId, timestamp(sort: Desc)])
 }

@@ -9,11 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@turf/turf": "^7.3.4",
     "leaflet": "^1.9.4",
     "leaflet-tooltip-layout": "^0.1.2",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-leaflet": "^4.2.1"
+    "react-leaflet": "^4.2.1",
+    "tokml": "^0.4.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",

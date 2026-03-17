@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import VesselMarker from "./VesselMarker.jsx";
 import VesselTrack from "./VesselTrack.jsx";
 import RestrictedZone from "./RestrictedZone.jsx";
+import DraggableVesselLabel from "./DraggableVesselLabel.jsx";
 
 // 겹침 방지: 지정된 순서 옵션 (상단, 왼쪽, 오른쪽) - 3방향으로 축소
 function computeDynamicOffsets(vessels, positions, zoom) {
@@ -87,13 +88,8 @@ function ZoomListener({ setZoom }) {
     return null;
 }
 
-export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true }) {
+export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true, zoneOpacity = 0.15, selectedRegions, toggleSelectedRegion, trackHours }) {
     const [zoom, setZoom] = useState(5);
-
-    const labelOffsets = useMemo(
-        () => computeDynamicOffsets(vessels, positions, zoom),
-        [vessels, positions, zoom]
-    );
 
     return (
         <MapContainer
@@ -109,27 +105,33 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                 maxZoom={19}
             />
             <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} />
-            <RestrictedZone visible={showRestrictedZone} />
+            <RestrictedZone visible={showRestrictedZone} opacityValue={zoneOpacity} selectedRegions={selectedRegions} toggleSelectedRegion={toggleSelectedRegion} />
 
             <ZoomListener setZoom={setZoom} />
 
             {vessels.map((vessel) => {
                 const vesselPositions = positions[vessel.id] || [];
                 const latest = vesselPositions[0];
-                const layout = labelOffsets[vessel.id] || { direction: 'top', offset: [0, -12] };
 
                 return (
                     <React.Fragment key={vessel.id}>
                         <VesselTrack positions={vesselPositions} color={vessel.color} />
                         {latest && (
-                            <VesselMarker
-                                vessel={vessel}
-                                position={latest}
-                                isSelected={selectedVesselId === vessel.id}
-                                onClick={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
-                                direction={layout.direction}
-                                labelOffset={layout.offset}
-                            />
+                            <>
+                                <VesselMarker
+                                    vessel={vessel}
+                                    position={latest}
+                                    isSelected={selectedVesselId === vessel.id}
+                                    onClick={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
+                                    trackHours={trackHours}
+                                />
+                                {/* 드래그 가능한 선박명 라벨 */}
+                                <DraggableVesselLabel
+                                    vessel={vessel}
+                                    position={latest}
+                                    trackHours={trackHours}
+                                />
+                            </>
                         )}
                     </React.Fragment>
                 );

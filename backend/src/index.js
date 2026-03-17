@@ -29,6 +29,33 @@ app.use("/api/vessels", vesselRoutes(prisma));
 app.use("/api/shares", sharesRoutes(prisma));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
+// 수동 강제 업데이트 API (별도 비밀번호 "880715" 요구)
+app.post("/api/force-update", async (req, res) => {
+  const { password, mmsiList } = req.body;
+  if (password !== "880715") {
+    return res.status(401).json({ error: "Invalid password for manual update" });
+  }
+
+  // 로그를 수집할 배열
+  const logs = [];
+  const logger = (msg) => logs.push(msg);
+
+  try {
+    // mmsiList가 있으면 해당 선박만, 없으면 전체 갱신
+    if (mmsiList && Array.isArray(mmsiList) && mmsiList.length > 0) {
+      logger(`▶ 선택 선박 ${mmsiList.length}척 갱신: ${mmsiList.join(', ')}`);
+      await datalasticPoller.forceUpdate(logger, mmsiList);
+    } else {
+      logger('▶ 전체 선박 강제 갱신 시작...');
+      await datalasticPoller.forceUpdate(logger);
+    }
+    res.json({ success: true, logs });
+  } catch (error) {
+    logger(`❌ 오류 발생: ${error.message}`);
+    res.status(500).json({ success: false, logs, error: error.message });
+  }
+});
+
 const httpServer = createServer(app);
 const wsServer = createWsServer(httpServer);
 

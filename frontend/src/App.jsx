@@ -79,6 +79,18 @@ function App() {
   };
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
   const [showRestrictedZone, setShowRestrictedZone] = useState(true);
+  const [zoneOpacity, setZoneOpacity] = useState(0.15); // New state for HRA opacity
+  const [selectedRegions, setSelectedRegions] = useState([]); // New state for per-region opacity
+
+  const handleToggleRegion = (regionName) => {
+    setSelectedRegions((prev) => {
+      if (prev.includes(regionName)) {
+        return prev.filter((r) => r !== regionName);
+      } else {
+        return [...prev, regionName];
+      }
+    });
+  };
 
   const handleToggleVessel = (id) => {
     setHiddenVessels(prev => {
@@ -261,6 +273,7 @@ function App() {
         onSelectVessel={handleSelectVessel}
         selectedVesselId={selectedVesselId}
         wsConnected={wsConnected}
+        apiFetch={apiFetch}
         onShowShare={() => setShowSharePanel(true)}
         onLogout={handleLogout}
         hiddenVessels={hiddenVessels}
@@ -268,6 +281,10 @@ function App() {
         onToggleAllVessels={handleToggleAllVessels}
         showRestrictedZone={showRestrictedZone}
         onToggleZone={handleToggleZone}
+        zoneOpacity={zoneOpacity}
+        onZoneOpacityChange={setZoneOpacity}
+        selectedRegions={selectedRegions}
+        onClearSelectedRegions={() => setSelectedRegions([])}
       />
 
       <div className="flex-1 relative mobile-map-wrapper">
@@ -278,6 +295,10 @@ function App() {
           panTrigger={panTrigger}
           onSelectVessel={handleSelectVessel}
           showRestrictedZone={showRestrictedZone}
+          zoneOpacity={zoneOpacity}
+          selectedRegions={selectedRegions}
+          toggleSelectedRegion={handleToggleRegion}
+          trackHours={trackHours}
         />
         <ReportTable vessels={vessels} positions={positions} />
       </div>
