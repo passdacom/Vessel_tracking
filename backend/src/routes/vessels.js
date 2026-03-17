@@ -88,14 +88,14 @@ export default function vesselRoutes(prisma) {
   // Add vessel
   router.post("/", async (req, res) => {
     try {
-      const { mmsi, alias, color } = req.body;
+      const { mmsi, alias, color, companyType } = req.body;
       if (!mmsi || !/^\d{9}$/.test(mmsi)) {
         return res.status(400).json({ error: "Valid 9-digit MMSI required" });
       }
       const existingCount = await prisma.vessel.count();
       const assignedColor = color || VESSEL_COLORS[existingCount % VESSEL_COLORS.length];
       const vessel = await prisma.vessel.create({
-        data: { mmsi, alias: alias || null, color: assignedColor },
+        data: { mmsi, alias: alias || null, color: assignedColor, companyType: companyType || '자사간사' },
       });
       const allVessels = await prisma.vessel.findMany();
 
@@ -111,12 +111,13 @@ export default function vesselRoutes(prisma) {
   router.patch("/:id", async (req, res) => {
     try {
       const { id } = req.params;
-      const { alias, color } = req.body;
+      const { alias, color, companyType } = req.body;
       const vessel = await prisma.vessel.update({
         where: { id: parseInt(id) },
         data: {
           ...(alias !== undefined && { alias: alias || null }),
           ...(color !== undefined && { color }),
+          ...(companyType !== undefined && { companyType }),
         },
       });
       req.app.locals.wsServer?.broadcast({ type: "vessel_updated", data: vessel });

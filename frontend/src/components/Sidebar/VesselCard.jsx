@@ -56,6 +56,7 @@ export default function VesselCard({
     const [alias, setAlias] = useState(vessel.alias || vessel.name || '');
     const [color, setColor] = useState(vessel.color);
     const [showInfo, setShowInfo] = useState(false); // 선박정보 토글
+    const [showGroupChange, setShowGroupChange] = useState(false); // 그룹변경 드롭다운
 
     const displayName = vessel.alias || vessel.name || vessel.mmsi;
     const stale =
@@ -76,6 +77,11 @@ export default function VesselCard({
         : latestPosition?.cog != null
             ? formatDeg(latestPosition.cog)
             : '---°';
+
+    function handleGroupChange(newType) {
+        onUpdate({ companyType: newType });
+        setShowGroupChange(false);
+    }
 
     function handleSave() {
         onUpdate({ alias: alias.trim() || null, color });
@@ -266,6 +272,37 @@ export default function VesselCard({
                                 </div>
                             )}
 
+                            {/* 그룹 변경 */}
+                            <div className="relative mb-1">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setShowGroupChange(v => !v); }}
+                                    className="w-full py-1.5 bg-gray-700 hover:bg-purple-700 text-gray-400 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-purple-500"
+                                >
+                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                                    </svg>
+                                    그룹 변경 <span className="text-gray-500">({vessel.companyType || '자사간사'})</span>
+                                </button>
+                                {showGroupChange && (
+                                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-10 overflow-hidden">
+                                        {['자사간사', '타사간사'].map(type => (
+                                            <button
+                                                key={type}
+                                                onClick={(e) => { e.stopPropagation(); handleGroupChange(type); }}
+                                                className={`w-full px-3 py-2.5 text-xs text-left transition flex items-center gap-2 ${
+                                                    (vessel.companyType || '자사간사') === type
+                                                        ? type === '자사간사' ? 'bg-blue-700 text-white' : 'bg-orange-700 text-white'
+                                                        : 'hover:bg-gray-700 text-gray-300'
+                                                }`}
+                                            >
+                                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${type === '자사간사' ? 'bg-blue-400' : 'bg-orange-400'}`} />
+                                                {type === '자사간사' ? '🏢 자사간사' : '🚢 타사간사'}
+                                                {(vessel.companyType || '자사간사') === type && <span className="ml-auto text-xs">✓ 현재</span>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
                             {/* 이동 / 삭제 버튼 한 줄 */}
                             <div className="flex gap-2 pt-0.5">
                                 <button

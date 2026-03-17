@@ -204,8 +204,8 @@ function App() {
     return () => clearInterval(id);
   }, [apiFetch]);
 
-  const handleAddVessel = async (mmsi, alias, color) => {
-    const res = await apiFetch("/vessels", { method: "POST", body: JSON.stringify({ mmsi, alias, color }) });
+  const handleAddVessel = async (mmsi, alias, color, companyType) => {
+    const res = await apiFetch("/vessels", { method: "POST", body: JSON.stringify({ mmsi, alias, color, companyType }) });
     if (res.ok) {
       const vessel = await res.json();
       setVessels((prev) => (prev.find((v) => v.id === vessel.id) ? prev : [...prev, vessel]));

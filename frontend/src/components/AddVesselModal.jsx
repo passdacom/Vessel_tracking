@@ -9,6 +9,7 @@ export default function AddVesselModal({ onAdd, onClose, existingCount }) {
   const [mmsi, setMmsi] = useState('');
   const [alias, setAlias] = useState('');
   const [color, setColor] = useState(COLORS[existingCount % COLORS.length]);
+  const [companyType, setCompanyType] = useState('자사간사');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -24,7 +25,7 @@ export default function AddVesselModal({ onAdd, onClose, existingCount }) {
     setLoading(true);
     setError('');
 
-    const err = await onAdd(mmsi.trim(), alias.trim() || null, color);
+    const err = await onAdd(mmsi.trim(), alias.trim() || null, color, companyType);
     if (err) {
       setError(err);
       setLoading(false);
@@ -86,6 +87,30 @@ export default function AddVesselModal({ onAdd, onClose, existingCount }) {
             />
           </div>
 
+          {/* 소속 그룹 선택 */}
+          <div>
+            <label className="text-gray-400 text-sm block mb-2">소속 그룹</label>
+            <div className="flex gap-2">
+              {['자사간사', '타사간사'].map((type) => {
+                const isActive = companyType === type;
+                const activeClass = type === '자사간사'
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-orange-600 border-orange-500 text-white';
+                const inactiveClass = 'bg-gray-700 border-gray-600 text-gray-400 hover:text-white hover:border-gray-500';
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setCompanyType(type)}
+                    className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition ${isActive ? activeClass : inactiveClass}`}
+                  >
+                    {type === '자사간사' ? '🏢 자사간사' : '🚢 타사간사'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <div>
             <label className="text-gray-400 text-sm block mb-2">지도 표시 색상</label>
             <div className="flex gap-2 flex-wrap">
@@ -112,9 +137,9 @@ export default function AddVesselModal({ onAdd, onClose, existingCount }) {
               style={{ borderColor: color, backgroundColor: color + '18' }}
             >
               <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-              <div>
+              <div className="flex-1">
                 <p className="text-white text-sm font-medium">{alias || `MMSI ${mmsi}`}</p>
-                <p className="text-gray-400 text-xs">MMSI: {mmsi}</p>
+                <p className="text-gray-400 text-xs">MMSI: {mmsi} · {companyType}</p>
               </div>
             </div>
           )}
