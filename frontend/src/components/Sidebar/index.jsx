@@ -14,7 +14,7 @@ const TRACK_OPTIONS = [
 function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel,
     onSelectVessel, selectedVesselId, wsConnected,
-    onShowShare, onLogout,
+    onShowShare, onLogout, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     showRestrictedZone, onToggleZone, zoneOpacity, onZoneOpacityChange,
     selectedRegions, onClearSelectedRegions }) {
@@ -63,13 +63,16 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                     <div className={`w-2.5 h-2.5 rounded-full ${wsConnected ? "bg-green-400" : "bg-red-400"}`} title={wsConnected ? "Connected" : "Disconnected"} />
                 </div>
                 <div className="flex gap-2 mb-2">
-                    <button onClick={onAddVessel} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                        Add Vessel
+                    <button onClick={onAddVessel} className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold rounded-lg transition flex items-center justify-center gap-1">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                        Add
                     </button>
-                    <button onClick={onManualEntry} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
-                        Manual Entry
+                    <button onClick={onManualEntry} className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-semibold rounded-lg transition flex items-center justify-center gap-1">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        Manual
+                    </button>
+                    <button onClick={onManageGroups} className="flex-1 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-semibold rounded-lg transition flex items-center justify-center gap-1">
+                        📂 Groups
                     </button>
                 </div>
             </div>
@@ -230,7 +233,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
 /* ── 모바일: 하단 드로어 ── */
 function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
     onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel,
-    onSelectVessel, selectedVesselId, wsConnected,
+    onSelectVessel, selectedVesselId, wsConnected, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     showRestrictedZone, onToggleZone, zoneOpacity, onZoneOpacityChange,
     selectedRegions, onClearSelectedRegions }) {
@@ -285,6 +288,10 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                         background: "#059669", color: "#fff", border: "none", borderRadius: 8,
                         padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer"
                     }}>✏️</button>
+                    <button onClick={onManageGroups} style={{
+                        background: "#4f46e5", color: "#fff", border: "none", borderRadius: 8,
+                        padding: "5px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer"
+                    }}>📂</button>
                     <button onClick={() => setOpen(v => !v)} style={{
                         background: open ? "#4b5563" : "#1f2937",
                         color: "#fff", border: "1px solid #6b7280",

@@ -5,6 +5,7 @@ import Map from "./components/Map/index.jsx";
 import Sidebar from "./components/Sidebar/index.jsx";
 import AddVesselModal from "./components/AddVesselModal.jsx";
 import ManualPositionModal from "./components/ManualPositionModal.jsx";
+import GroupManageModal from "./components/GroupManageModal.jsx";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 
 function ReportTable({ vessels, positions }) {
@@ -63,6 +64,7 @@ function App() {
   const [trackHours, setTrackHours] = useState(24);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
+  const [showGroupManageModal, setShowGroupManageModal] = useState(false);
   const [selectedVesselId, setSelectedVesselId] = useState(null);
   const [panTrigger, setPanTrigger] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
@@ -268,6 +270,7 @@ function App() {
         onTrackHoursChange={setTrackHours}
         onAddVessel={() => setShowAddModal(true)}
         onManualEntry={() => setShowManualModal(true)}
+        onManageGroups={() => setShowGroupManageModal(true)}
         onDeleteVessel={handleDeleteVessel}
         onUpdateVessel={handleUpdateVessel}
         onSelectVessel={handleSelectVessel}
@@ -315,6 +318,9 @@ function App() {
       )}
       {showManualModal && (
         <ManualPositionModal vessels={vessels} onSave={handleManualPosition} onClose={() => setShowManualModal(false)} />
+      )}
+      {showGroupManageModal && (
+        <GroupManageModal vessels={vessels} onUpdateVessel={handleUpdateVessel} onClose={() => setShowGroupManageModal(false)} />
       )}
     </div>
   );
