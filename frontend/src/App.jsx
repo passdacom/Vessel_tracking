@@ -68,15 +68,30 @@ function App() {
   const [selectedVesselId, setSelectedVesselId] = useState(null);
   const [panTrigger, setPanTrigger] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
-  const [isAuthed, setIsAuthed] = useState(() => localStorage.getItem("vessel_auth") === "kb1234");
+  const [isAuthed, setIsAuthed] = useState(() => {
+    const auth = localStorage.getItem("vessel_auth");
+    if (auth === "kb1234") {
+      const expires = localStorage.getItem("vessel_auth_expires");
+      if (expires && Date.now() < parseInt(expires, 10)) {
+        return true;
+      }
+      // Expired or no expiration key -> clear it out
+      localStorage.removeItem("vessel_auth");
+      localStorage.removeItem("vessel_auth_expires");
+    }
+    return false;
+  });
   const [showSharePanel, setShowSharePanel] = useState(false);
 
   const handleLogin = (pw) => {
     localStorage.setItem("vessel_auth", pw);
+    // 24 hours in milliseconds: 24 * 60 * 60 * 1000 = 86400000
+    localStorage.setItem("vessel_auth_expires", (Date.now() + 86400000).toString());
     setIsAuthed(true);
   };
   const handleLogout = () => {
     localStorage.removeItem("vessel_auth");
+    localStorage.removeItem("vessel_auth_expires");
     setIsAuthed(false);
   };
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
