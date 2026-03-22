@@ -99,6 +99,67 @@ function App() {
   const [zoneOpacity, setZoneOpacity] = useState(0.15); // New state for HRA opacity
   const [selectedRegions, setSelectedRegions] = useState([]); // New state for per-region opacity
 
+  // New state for custom groups
+  const [customGroups, setCustomGroups] = useState(() => {
+    try {
+      const stored = localStorage.getItem("vessel_custom_groups");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Persist custom groups
+  useEffect(() => {
+    localStorage.setItem("vessel_custom_groups", JSON.stringify(customGroups));
+  }, [customGroups]);
+
+  const handleAddCustomGroup = (groupName) => {
+    if (!groupName) return;
+    setCustomGroups(prev => prev.includes(groupName) ? prev : [...prev, groupName]);
+  };
+
+  const handleRenameGroup = async (oldName, newName) => {
+    if (!newName || oldName === newName) return;
+    // 1. Rename in customGroups
+    setCustomGroups(prev => prev.map(g => g === oldName ? newName : g));
+    
+    // 2. Add to custom groups if it's new
+    handleAddCustomGroup(newName);
+
+    // 3. Update all vessels in this group
+    const vesselsToUpdate = vessels.filter(v => (v.companyType || "자사간사") === oldName);
+    await Promise.all(vesselsToUpdate.map(v => 
+      apiFetch(`/vessels/${v.id}`, { method: "PATCH", body: JSON.stringify({ companyType: newName }) })
+    ));
+    
+    if (vesselsToUpdate.length > 0) {
+      // Refresh vessels to get new companyType (or rely on optimistic update / websocket)
+      const updatedVesselRes = await apiFetch("/vessels");
+      if (updatedVesselRes.ok) {
+        setVessels(await updatedVesselRes.json());
+      }
+    }
+  };
+
+  const handleDeleteGroup = async (groupName) => {
+    // 1. Remove from customGroups
+    setCustomGroups(prev => prev.filter(g => g !== groupName));
+
+    // 2. Move vessels to default
+    const vesselsToUpdate = vessels.filter(v => (v.companyType || "자사간사") === groupName);
+    await Promise.all(vesselsToUpdate.map(v => 
+      apiFetch(`/vessels/${v.id}`, { method: "PATCH", body: JSON.stringify({ companyType: "자사간사" }) })
+    ));
+
+    if (vesselsToUpdate.length > 0) {
+      const updatedVesselRes = await apiFetch("/vessels");
+      if (updatedVesselRes.ok) {
+        setVessels(await updatedVesselRes.json());
+      }
+    }
+  };
+
   const handleToggleRegion = (regionName) => {
     setSelectedRegions((prev) => {
       if (prev.includes(regionName)) {
@@ -303,6 +364,7 @@ function App() {
         onZoneOpacityChange={setZoneOpacity}
         selectedRegions={selectedRegions}
         onClearSelectedRegions={() => setSelectedRegions([])}
+        customGroups={customGroups}
       />
 
       <div className="flex-1 relative mobile-map-wrapper">
@@ -335,7 +397,15 @@ function App() {
         <ManualPositionModal vessels={vessels} onSave={handleManualPosition} onClose={() => setShowManualModal(false)} />
       )}
       {showGroupManageModal && (
-        <GroupManageModal vessels={vessels} onUpdateVessel={handleUpdateVessel} onClose={() => setShowGroupManageModal(false)} />
+        <GroupManageModal 
+          vessels={vessels} 
+          onUpdateVessel={handleUpdateVessel} 
+          onClose={() => setShowGroupManageModal(false)}
+          customGroups={customGroups}
+          onAddGroup={handleAddCustomGroup}
+          onRenameGroup={handleRenameGroup}
+          onDeleteGroup={handleDeleteGroup}
+        />
       )}
     </div>
   );

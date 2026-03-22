@@ -101,13 +101,36 @@ export default function ApiUpdateModal({ onClose, apiFetch, vessels = [] }) {
                 body: JSON.stringify(body),
             });
 
-            const data = await res.json();
-
             if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
                 throw new Error(data.error || '업데이트에 실패했습니다.');
             }
 
-            setLogs(prev => [...prev, ...(data.logs || []), '> ✅ 업데이트 완료']);
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let done = false;
+            let buffer = '';
+            
+            while (!done) {
+                const { value, done: readerDone } = await reader.read();
+                done = readerDone;
+                if (value) {
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // keep the last incomplete line
+                    if (lines.length > 0) {
+                        const validLines = lines.filter(l => l.trim().length > 0);
+                        if (validLines.length > 0) {
+                            setLogs(prev => [...prev, ...validLines]);
+                        }
+                    }
+                }
+            }
+            if (buffer.trim().length > 0) {
+                setLogs(prev => [...prev, buffer.trim()]);
+            }
+
+            setLogs(prev => [...prev, '> ✅ 업데이트 완료']);
             setStep('done');
         } catch (err) {
             setErrorMsg(err.message);

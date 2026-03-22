@@ -1,23 +1,20 @@
 import React, { useState, useMemo } from "react";
 
-const GroupManageModal = ({ vessels, onUpdateVessel, onClose }) => {
+const GroupManageModal = ({ vessels, onUpdateVessel, onClose, customGroups = [], onAddGroup, onRenameGroup, onDeleteGroup }) => {
   const [newGroupName, setNewGroupName] = useState("");
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [editingName, setEditingName] = useState("");
 
-  // Extract unique groups from vessels
+  // Extract unique groups from vessels and add customGroups
   const groups = useMemo(() => {
-    const groupSet = new Set();
+    const groupSet = new Set(["자사간사", "타사간사", ...customGroups]);
     vessels.forEach(v => {
       if (v.companyType) groupSet.add(v.companyType);
     });
-    // Ensure default groups exist if we want them, otherwise just what's in vessels
-    if (groupSet.size === 0) {
-      groupSet.add("자사간사");
-      groupSet.add("타사간사");
-    }
     return Array.from(groupSet).sort();
-  }, [vessels]);
+  }, [vessels, customGroups]);
 
-  const [selectedGroup, setSelectedGroup] = useState(groups[0] || "");
+  const [selectedGroup, setSelectedGroup] = useState(groups[0] || "자사간사");
 
   // Update selectedGroup if it disappears (e.g., last vessel moved out)
   if (!groups.includes(selectedGroup) && groups.length > 0) {
@@ -31,14 +28,31 @@ const GroupManageModal = ({ vessels, onUpdateVessel, onClose }) => {
     const trimmed = newGroupName.trim();
     if (!trimmed) return;
     
-    // We can't immediately create an empty group based on DB because it relies on vessels.
-    // Instead, "Add Group" is more of a visual thing, or we just instruct users to move ships.
-    // But since the UI has "+ Add Group", let's handle it by creating a temporary empty group state
-    // Actually, the prompt says "+ 그룹 추가 → 인라인 입력창으로 새 그룹명 등록". 
-    // And "신규 그룹 = 새 그룹명으로 선박을 이동시키면 자동 생성".
-    // Let's stick with moving a ship creates a group. 
-    // Wait, the plan says "+ 그룹 추가" is an inline input. Let's add a visual-only group for now if they type one.
-    // However, it's easier to just move ships to a new group name.
+    if (onAddGroup) {
+      onAddGroup(trimmed);
+      setNewGroupName("");
+      setSelectedGroup(trimmed);
+    }
+  };
+
+  const handleRenameSubmit = (oldName) => {
+    const trimmed = editingName.trim();
+    if (trimmed && trimmed !== oldName && onRenameGroup) {
+      onRenameGroup(oldName, trimmed);
+      if (selectedGroup === oldName) {
+        setSelectedGroup(trimmed);
+      }
+    }
+    setEditingGroup(null);
+  };
+
+  const handleDeleteClick = (g, e) => {
+    e.stopPropagation();
+    if (window.confirm(`'${g}' 그룹을 정말 삭제하시겠습니까?\n이 그룹에 속한 선박은 '자사간사'로 이동됩니다.`)) {
+      if (onDeleteGroup) {
+        onDeleteGroup(g);
+      }
+    }
   };
 
   return (
@@ -60,23 +74,74 @@ const GroupManageModal = ({ vessels, onUpdateVessel, onClose }) => {
             <div className="overflow-y-auto flex-1 p-2">
               {groups.map(g => {
                 const count = vessels.filter(v => (v.companyType || "자사간사") === g).length;
+                const isEditing = editingGroup === g;
+
                 return (
-                  <button
-                    key={g}
-                    onClick={() => setSelectedGroup(g)}
-                    className={`w-full text-left px-3 py-2 rounded mb-1 text-sm flex justify-between items-center ${
+                  <div key={g}
+                    className={`group w-full text-left px-3 py-2 rounded mb-1 text-sm flex justify-between items-center cursor-pointer ${
                       selectedGroup === g ? "bg-blue-100 text-blue-800 font-semibold" : "hover:bg-gray-200 text-gray-700"
                     }`}
+                    onClick={() => {
+                      if (!isEditing) setSelectedGroup(g);
+                    }}
                   >
-                    <span className="truncate pr-2">{g}</span>
-                    <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs flex-shrink-0">{count}</span>
-                  </button>
+                    {isEditing ? (
+                      <div className="flex w-full items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") handleRenameSubmit(g);
+                            if (e.key === "Escape") setEditingGroup(null);
+                          }}
+                          className="w-full text-sm border rounded px-1 py-0.5 font-normal"
+                        />
+                        <button onClick={() => handleRenameSubmit(g)} className="text-blue-600 font-bold px-1">✓</button>
+                        <button onClick={() => setEditingGroup(null)} className="text-gray-500 font-bold px-1">✕</button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="truncate pr-2">{g}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs flex-shrink-0">{count}</span>
+                          <div className="hidden group-hover:flex items-center opacity-70">
+                            <button 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingGroup(g);
+                                setEditingName(g);
+                              }}
+                              className="text-gray-600 hover:text-blue-600 px-1"
+                              title="수정"
+                            >✏️</button>
+                            <button 
+                              onClick={(e) => handleDeleteClick(g, e)}
+                              className="text-gray-600 hover:text-red-500 px-1"
+                              title="삭제"
+                            >🗑️</button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 );
               })}
             </div>
-            {/* Group Addition (Informational or Temporary) */}
-            <div className="p-3 border-t border-gray-200 text-xs text-gray-500 text-center">
-              * 새 그룹은 선박 이동 시<br/>이름을 입력하여 생성합니다.
+            
+            {/* Add Group */}
+            <div className="p-3 border-t border-gray-200 bg-gray-100">
+              <form onSubmit={handleCreateGroup} className="flex gap-2 relative">
+                <input 
+                  type="text" 
+                  value={newGroupName} 
+                  onChange={(e) => setNewGroupName(e.target.value)} 
+                  placeholder="새 그룹명 입력" 
+                  className="flex-1 text-sm px-2 py-1.5 border rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <button type="submit" className="bg-blue-600 text-white px-3 py-1.5 rounded text-sm hover:bg-blue-700 font-semibold shadow-sm">+</button>
+              </form>
             </div>
           </div>
 

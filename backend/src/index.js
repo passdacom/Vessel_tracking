@@ -36,9 +36,12 @@ app.post("/api/force-update", async (req, res) => {
     return res.status(401).json({ error: "Invalid password for manual update" });
   }
 
-  // 로그를 수집할 배열
-  const logs = [];
-  const logger = (msg) => logs.push(msg);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  const logger = (msg) => {
+    res.write(msg + '\n');
+  };
 
   try {
     // mmsiList가 있으면 해당 선박만, 없으면 전체 갱신
@@ -49,10 +52,10 @@ app.post("/api/force-update", async (req, res) => {
       logger('▶ 전체 선박 강제 갱신 시작...');
       await datalasticPoller.forceUpdate(logger);
     }
-    res.json({ success: true, logs });
+    res.end();
   } catch (error) {
     logger(`❌ 오류 발생: ${error.message}`);
-    res.status(500).json({ success: false, logs, error: error.message });
+    res.end();
   }
 });
 
