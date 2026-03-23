@@ -26,17 +26,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// 인증 실패 시 브루트포스 방지: 15분 내 20회 초과 → 429
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests, please try again later" },
-});
-app.use("/api", authLimiter);
-
-// force-update는 더 엄격하게: 15분 내 5회 초과 → 429
+// force-update: 15분 내 5회 초과 → 429 (API 크레딧 소모 방지 + 브루트포스 방지)
 const forceUpdateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
