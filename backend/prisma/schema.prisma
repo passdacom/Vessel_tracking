@@ -50,7 +50,24 @@ model Position {
   impliedSpeed Float?                      // 계산된 신호 속도 (knots)
   spoofReason  String?                     // 의심 이유 메시지
 
+  @@unique([vesselId, timestamp])
   @@index([vesselId, timestamp(sort: Desc)])
+}
+
+model Incident {
+  id           Int      @id @default(autoincrement())
+  date         DateTime
+  vesselName   String
+  incidentType String
+  severity     String
+  lat          Float
+  lon          Float
+  cargo        String?
+  crew         String?
+  description  String?
+  link         String?
+  source       String?
+  createdAt    DateTime @default(now())
 }
 
 model SharedView {

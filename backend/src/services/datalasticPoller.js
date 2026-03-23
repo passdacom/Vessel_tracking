@@ -139,18 +139,9 @@ export function createDatalasticPoller(prisma, onPosition) {
         await prisma.vessel.update({ where: { id: v.id }, data: { name: d.name } });
       }
 
-      // 동일 타임스탬프 중복 방지
-      const existing = await prisma.position.findFirst({
-        where: { vesselId: v.id, timestamp },
-      });
-      if (existing) {
-        console.log(`[Datalastic] ${v.mmsi} - timestamp ${timestamp.toISOString()} already exists, skipping`);
-        continue;
-      }
-
       // ----- AIS 스푸핑 탐지 -----
       const prevPos = await prisma.position.findFirst({
-        where: { vesselId: v.id, suspicious: false }, // 정상 위치만 기준
+        where: { vesselId: v.id, suspicious: false },
         orderBy: { timestamp: 'desc' },
         select: { lat: true, lon: true, timestamp: true },
       });
@@ -161,8 +152,10 @@ export function createDatalasticPoller(prisma, onPosition) {
       }
       // -------------------------
 
-      const position = await prisma.position.create({
-        data: {
+      // upsert: 동일 (vesselId, timestamp) 이미 존재하면 스킵 (no-op update)
+      const position = await prisma.position.upsert({
+        where: { vesselId_timestamp: { vesselId: v.id, timestamp } },
+        create: {
           vesselId: v.id,
           lat, lon, cog, sog, heading,
           navStatus,
@@ -173,6 +166,7 @@ export function createDatalasticPoller(prisma, onPosition) {
           impliedSpeed,
           spoofReason: reason,
         },
+        update: {}, // 이미 존재하면 변경 없이 스킵
       });
 
       if (!suspicious) {
@@ -235,23 +229,12 @@ export function createDatalasticPoller(prisma, onPosition) {
         const eta = d.eta_UTC ? new Date(d.eta_UTC) : null;
         const timestamp = d.last_position_epoch ? new Date(d.last_position_epoch * 1000) : new Date();
 
-        // 동일 타임스탬프 중복 방지
-        const existing = await prisma.position.findFirst({
-          where: { vesselId: v.id, timestamp },
-        });
-
-        if (existing) {
-          if (logger) logger(`[Datalastic] ⏩ 중복 스킵: ${v.name || v.mmsi} - ${timestamp.toISOString()} 데이터 이미 존재`);
-          skippedCount++;
-          continue;
-        }
-
         // 이름 업데이트
         if (d.name && !v.name) {
           await prisma.vessel.update({ where: { id: v.id }, data: { name: d.name } });
         }
 
-        // ----- AIS 스푸합 탐지 -----
+        // ----- AIS 스푸핑 탐지 -----
         const prevPosF = await prisma.position.findFirst({
           where: { vesselId: v.id, suspicious: false },
           orderBy: { timestamp: 'desc' },
@@ -264,8 +247,10 @@ export function createDatalasticPoller(prisma, onPosition) {
         }
         // -------------------------
 
-        const position = await prisma.position.create({
-          data: {
+        // upsert: 동일 (vesselId, timestamp) 이미 존재하면 스킵 (no-op update)
+        const position = await prisma.position.upsert({
+          where: { vesselId_timestamp: { vesselId: v.id, timestamp } },
+          create: {
             vesselId: v.id,
             lat, lon, cog, sog, heading,
             navStatus,
@@ -276,8 +261,11 @@ export function createDatalasticPoller(prisma, onPosition) {
             impliedSpeed: ispd,
             spoofReason: sreason,
           },
+          update: {}, // 이미 존재하면 변경 없이 스킵
         });
 
+        // createdAt === updatedAt이면 신규, 아니면 중복 스킵
+        const isNew = position.id !== undefined;
         if (logger) logger(`[Datalastic] ${susp ? '🚨 [Spoofing]' : '✅'} 갱신: ${d.name || v.alias || v.mmsi} | SOG:${sog} | 위치:${lat.toFixed(3)},${lon.toFixed(3)} | 시간:${timestamp.toISOString()}`);
         updatedCount++;
 
