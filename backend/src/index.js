@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import { createServer } from "http";
 import { PrismaClient } from "@prisma/client";
 import vesselRoutes from "./routes/vessels.js";
@@ -24,6 +25,26 @@ app.use(cors({
   },
 }));
 app.use(express.json());
+
+// 인증 실패 시 브루트포스 방지: 15분 내 20회 초과 → 429
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later" },
+});
+app.use("/api", authLimiter);
+
+// force-update는 더 엄격하게: 15분 내 5회 초과 → 429
+const forceUpdateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many update requests, please try again later" },
+});
+app.use("/api/force-update", forceUpdateLimiter);
 
 // 공유 링크 공개 조회(/api/shares/view/*)만 인증 제외, 나머지는 필수 인증
 app.use((req, res, next) => {

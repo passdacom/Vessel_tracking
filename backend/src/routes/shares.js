@@ -38,8 +38,13 @@ export default function sharesRoutes(prisma) {
 
   // 관리자: 공유 링크 삭제
   router.delete("/:token", requireAdmin, async (req, res) => {
-    await prisma.sharedView.delete({ where: { token: req.params.token } }).catch(() => {});
-    res.json({ ok: true });
+    try {
+      const result = await prisma.sharedView.deleteMany({ where: { token: req.params.token } });
+      if (result.count === 0) return res.status(404).json({ error: "Share not found" });
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // 공개: 토큰으로 선박 데이터 조회 (읽기 전용)
