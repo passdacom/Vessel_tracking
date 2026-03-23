@@ -1,12 +1,14 @@
 import express from "express";
 import crypto from "crypto";
 
-const ADMIN_PASSWORD = "kb1234";
-
 function requireAdmin(req, res, next) {
+  const adminPassword = process.env.AUTH_PASSWORD;
+  if (!adminPassword) {
+    return res.status(500).json({ error: "Server misconfiguration: AUTH_PASSWORD not set" });
+  }
   const auth = req.headers.authorization || "";
   const password = auth.replace("Bearer ", "");
-  if (password !== ADMIN_PASSWORD) {
+  if (password !== adminPassword) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();
@@ -44,6 +46,9 @@ export default function sharesRoutes(prisma) {
   router.get("/view/:token", async (req, res) => {
     const share = await prisma.sharedView.findUnique({ where: { token: req.params.token } });
     if (!share) return res.status(404).json({ error: "Invalid or expired link" });
+    if (share.expiresAt && new Date() > share.expiresAt) {
+      return res.status(410).json({ error: "This link has expired" });
+    }
 
     const vesselIds = JSON.parse(share.vesselIds);
     const hours = parseInt(req.query.hours || "24");

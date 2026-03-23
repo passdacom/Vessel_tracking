@@ -16,7 +16,7 @@ function isAuthValid() {
 
 /**
  * API 수동 강제 수신 모달
- * - 비밀번호 인증 (880715) — 1시간 세션 유지
+ * - 관리자 비밀번호 인증 — 1시간 세션 유지
  * - 전체 선박 또는 선택 선박만 갱신
  * - 실행 로그 터미널 뷰어
  */
@@ -67,16 +67,8 @@ export default function ApiUpdateModal({ onClose, apiFetch, vessels = [] }) {
             return;
         }
 
-        // 비밀번호 검증 (auth 단계에서만)
-        if (step === 'auth') {
-            if (password !== '880715') {
-                setErrorMsg('비밀번호가 올바르지 않습니다.');
-                setPassword('');
-                return;
-            }
-            // 인증 성공 → 시각 저장 (1시간 세션)
-            saveAuthTime();
-        }
+        // 비밀번호 검증은 서버에서 수행 (클라이언트에 비밀번호 하드코딩 금지)
+        // auth 단계에서는 입력값만 전달하고, 서버 응답으로 성공/실패 판단
 
         setStep('running');
         setLogs([]);
@@ -103,8 +95,20 @@ export default function ApiUpdateModal({ onClose, apiFetch, vessels = [] }) {
 
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
-                throw new Error(data.error || '업데이트에 실패했습니다.');
+                const errMsg = res.status === 401
+                    ? '비밀번호가 올바르지 않습니다.'
+                    : (data.error || '업데이트에 실패했습니다.');
+                // 인증 실패 시 auth 단계로 복귀
+                if (res.status === 401) {
+                    setStep('auth');
+                    setPassword('');
+                    setErrorMsg(errMsg);
+                    return;
+                }
+                throw new Error(errMsg);
             }
+            // 서버 인증 성공 → 세션 시각 저장
+            if (step === 'auth') saveAuthTime();
 
             const reader = res.body.getReader();
             const decoder = new TextDecoder('utf-8');

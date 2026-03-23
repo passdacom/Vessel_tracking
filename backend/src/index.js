@@ -13,13 +13,24 @@ const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors({ origin: true }));
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+  : [];
+app.use(cors({
+  origin: (origin, callback) => {
+    // 같은 출처(프록시) 또는 허용된 origin만 허용
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error("Not allowed by CORS"));
+  },
+}));
 app.use(express.json());
 
-// 공유 링크는 인증 제외
+// 공유 링크 공개 조회(/api/shares/view/*)만 인증 제외, 나머지는 필수 인증
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api/shares")) return next();
-  if (!process.env.AUTH_PASSWORD) return next();
+  if (req.path.startsWith("/api/shares/view/")) return next();
+  if (!process.env.AUTH_PASSWORD) {
+    return res.status(500).json({ error: "Server misconfiguration: AUTH_PASSWORD not set" });
+  }
   const token = req.headers.authorization?.split(" ")[1];
   if (token === process.env.AUTH_PASSWORD) return next();
   res.status(401).json({ error: "Unauthorized" });
@@ -29,10 +40,10 @@ app.use("/api/vessels", vesselRoutes(prisma));
 app.use("/api/shares", sharesRoutes(prisma));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// 수동 강제 업데이트 API (별도 비밀번호 "880715" 요구)
+// 수동 강제 업데이트 API (FORCE_UPDATE_PASSWORD 요구)
 app.post("/api/force-update", async (req, res) => {
   const { password, mmsiList } = req.body;
-  if (password !== "880715") {
+  if (!process.env.FORCE_UPDATE_PASSWORD || password !== process.env.FORCE_UPDATE_PASSWORD) {
     return res.status(401).json({ error: "Invalid password for manual update" });
   }
 

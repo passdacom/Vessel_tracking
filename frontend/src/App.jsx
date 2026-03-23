@@ -70,12 +70,12 @@ function App() {
   const [wsConnected, setWsConnected] = useState(false);
   const [isAuthed, setIsAuthed] = useState(() => {
     const auth = localStorage.getItem("vessel_auth");
-    if (auth === "kb1234") {
+    if (auth) {
       const expires = localStorage.getItem("vessel_auth_expires");
       if (expires && Date.now() < parseInt(expires, 10)) {
         return true;
       }
-      // Expired or no expiration key -> clear it out
+      // 만료됐으면 삭제
       localStorage.removeItem("vessel_auth");
       localStorage.removeItem("vessel_auth_expires");
     }
@@ -242,7 +242,8 @@ function App() {
 
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsHost = window.location.protocol === "https:" ? window.location.host : `${window.location.hostname}:3001`;
-  const wsUrl = `${proto}//${wsHost}/ws`;
+  const wsToken = localStorage.getItem("vessel_auth") || "";
+  const wsUrl = `${proto}//${wsHost}/ws?token=${encodeURIComponent(wsToken)}`;
 
   useWebSocket(wsUrl, (msg) => {
     if (msg.type === "position") {
