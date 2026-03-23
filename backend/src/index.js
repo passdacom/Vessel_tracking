@@ -14,16 +14,9 @@ const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
-  : [];
-app.use(cors({
-  origin: (origin, callback) => {
-    // 같은 출처(프록시) 또는 허용된 origin만 허용
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    callback(new Error("Not allowed by CORS"));
-  },
-}));
+// CORS: 실제 인증은 Bearer 토큰이 담당. Nginx→Docker→Express 프록시 구조상
+// 브라우저 Origin이 서버 IP가 되어 whitelist 방식이 동작하지 않음.
+app.use(cors({ origin: true, credentials: false }));
 app.use(express.json());
 
 // force-update: 15분 내 5회 초과 → 429 (API 크레딧 소모 방지 + 브루트포스 방지)
