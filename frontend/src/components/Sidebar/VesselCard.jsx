@@ -61,6 +61,7 @@ export default function VesselCard({
     const [color, setColor] = useState(vessel.color);
     const [showInfo, setShowInfo] = useState(false); // 선박정보 토글
     const [showGroupChange, setShowGroupChange] = useState(false); // 그룹변경 드롭다운
+    const [showHistory, setShowHistory] = useState(false); // 히스토리 패널 토글
     const [historyDays, setHistoryDays] = useState(7);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyResult, setHistoryResult] = useState(null);
@@ -302,89 +303,90 @@ export default function VesselCard({
                                 </div>
                             )}
 
-                            {/* ── 히스토리 가져오기 + 항적 재생 ── */}
-                            <div className="flex gap-2 pt-0.5">
-                                {/* 항적 재생 */}
+                            {/* ── 액션 버튼: 재생 / 히스토리 / 그룹 ── */}
+                            <div className="flex gap-1.5 pt-0.5">
                                 <button
                                     onClick={(e) => { e.stopPropagation(); if (onStartPlayback) onStartPlayback(vessel.id); }}
-                                    className="flex-1 py-1.5 bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
+                                    className="flex-1 py-1 bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white text-[11px] rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
                                     title="DB에 저장된 항적을 재생합니다"
                                 >
-                                    <span>▶</span> 항적 재생
+                                    ▶ 재생
                                 </button>
-                            </div>
-
-                            {/* 히스토리 가져오기 (API) */}
-                            <div className="bg-gray-750 rounded p-2 border border-gray-700 space-y-1.5">
-                                <div className="flex items-center gap-2">
-                                    <span className="text-xs text-gray-400 whitespace-nowrap">히스토리</span>
-                                    <select
-                                        value={historyDays}
-                                        onChange={(e) => { e.stopPropagation(); setHistoryDays(parseInt(e.target.value)); }}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="bg-gray-700 text-white text-xs rounded px-1.5 py-1 border border-gray-600 flex-shrink-0"
-                                    >
-                                        {[1, 3, 5, 7, 14, 30].map(d => (
-                                            <option key={d} value={d}>{d}일</option>
-                                        ))}
-                                    </select>
-                                    <span className="text-[10px] text-gray-500">({historyDays} 크레딧)</span>
-                                    <button
-                                        onClick={handleFetchHistory}
-                                        disabled={historyLoading}
-                                        className="ml-auto px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-600 text-white text-xs rounded transition flex-shrink-0"
-                                    >
-                                        {historyLoading ? '...' : '가져오기'}
-                                    </button>
-                                </div>
-                                {historyResult && (
-                                    <div className={`text-[10px] ${historyResult.startsWith('오류') || historyResult === '네트워크 오류' ? 'text-red-400' : 'text-green-400'}`}>
-                                        {historyResult}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* 그룹 변경 */}
-                            <div className="relative mb-1">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); setShowHistory(v => !v); }}
+                                    className={`flex-1 py-1 text-[11px] rounded transition flex items-center justify-center gap-1 border ${showHistory ? 'bg-indigo-700 border-indigo-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-white hover:border-indigo-500'}`}
+                                    title="Datalastic에서 과거 위치 데이터 가져오기"
+                                >
+                                    📡 히스토리
+                                </button>
                                 <button
                                     onClick={(e) => { e.stopPropagation(); setShowGroupChange(v => !v); }}
-                                    className="w-full py-1.5 bg-gray-700 hover:bg-purple-700 text-gray-400 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-purple-500"
+                                    className={`flex-1 py-1 text-[11px] rounded transition flex items-center justify-center gap-1 border ${showGroupChange ? 'bg-purple-700 border-purple-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-white hover:border-purple-500'}`}
                                 >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                                    </svg>
-                                    그룹 변경 <span className="text-gray-500">({vessel.companyType || '자사간사'})</span>
+                                    ⇄ 그룹
                                 </button>
-                                {showGroupChange && (
-                                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-10 overflow-hidden max-h-48 overflow-y-auto">
-                                        {['자사간사', '타사간사', ...customGroups].map(type => {
-                                            const isCurrent = (vessel.companyType || '자사간사') === type;
-                                            return (
-                                                <button
-                                                    key={type}
-                                                    onClick={(e) => { e.stopPropagation(); handleGroupChange(type); }}
-                                                    className={`w-full px-3 py-2.5 text-xs text-left transition flex items-center gap-2 ${
-                                                        isCurrent ? 'bg-blue-700 text-white' : 'hover:bg-gray-700 text-gray-300'
-                                                    }`}
-                                                >
-                                                    <span className="w-2 h-2 rounded-full flex-shrink-0 bg-blue-400" />
-                                                    {type}
-                                                    {isCurrent && <span className="ml-auto text-xs">✓ 현재</span>}
-                                                </button>
-                                            );
-                                        })}</div>
-                                )}
                             </div>
-                            {/* 보관 / 삭제 버튼 한 줄 */}
+
+                            {/* 히스토리 가져오기 (토글 패널) */}
+                            {showHistory && (
+                                <div className="bg-gray-750 rounded p-2 border border-gray-700 space-y-1.5">
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            value={historyDays}
+                                            onChange={(e) => { e.stopPropagation(); setHistoryDays(parseInt(e.target.value)); }}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="bg-gray-700 text-white text-xs rounded px-1.5 py-1 border border-gray-600 flex-shrink-0"
+                                        >
+                                            {[1, 3, 5, 7, 14, 30].map(d => (
+                                                <option key={d} value={d}>{d}일</option>
+                                            ))}
+                                        </select>
+                                        <span className="text-[10px] text-gray-500">({historyDays} 크레딧)</span>
+                                        <button
+                                            onClick={handleFetchHistory}
+                                            disabled={historyLoading}
+                                            className="ml-auto px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-600 text-white text-xs rounded transition flex-shrink-0"
+                                        >
+                                            {historyLoading ? '...' : '가져오기'}
+                                        </button>
+                                    </div>
+                                    {historyResult && (
+                                        <div className={`text-[10px] ${historyResult.startsWith('오류') || historyResult === '네트워크 오류' ? 'text-red-400' : 'text-green-400'}`}>
+                                            {historyResult}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* 그룹 변경 (토글 패널) */}
+                            {showGroupChange && (
+                                <div className="bg-gray-800 border border-gray-600 rounded-lg overflow-hidden max-h-36 overflow-y-auto">
+                                    {['자사간사', '타사간사', ...customGroups].map(type => {
+                                        const isCurrent = (vessel.companyType || '자사간사') === type;
+                                        return (
+                                            <button
+                                                key={type}
+                                                onClick={(e) => { e.stopPropagation(); handleGroupChange(type); }}
+                                                className={`w-full px-3 py-2 text-xs text-left transition flex items-center gap-2 ${
+                                                    isCurrent ? 'bg-blue-700 text-white' : 'hover:bg-gray-700 text-gray-300'
+                                                }`}
+                                            >
+                                                <span className="w-2 h-2 rounded-full flex-shrink-0 bg-blue-400" />
+                                                {type}
+                                                {isCurrent && <span className="ml-auto text-xs">✓ 현재</span>}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {/* 보관 / 삭제 */}
                             <div className="flex gap-2 pt-0.5">
                                 <button
                                     onClick={(e) => { e.stopPropagation(); if (onArchive) onArchive(); }}
-                                    className="flex-1 py-1.5 bg-gray-700 hover:bg-amber-700 text-gray-400 hover:text-amber-200 text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-amber-600"
+                                    className="flex-1 py-1 bg-gray-700 hover:bg-amber-700 text-gray-400 hover:text-amber-200 text-[11px] rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-amber-600"
                                     title="폴링 중단 후 보관함으로 이동"
                                 >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2L19 8M10 12v4m4-4v4" />
-                                    </svg>
                                     보관
                                 </button>
                                 <button
@@ -393,11 +395,8 @@ export default function VesselCard({
                                         if (window.confirm(`"${displayName}"을 삭제하시겠습니까?`))
                                             onDelete();
                                     }}
-                                    className="flex-1 py-1.5 bg-gray-700 hover:bg-red-600 text-gray-400 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-red-500"
+                                    className="flex-1 py-1 bg-gray-700 hover:bg-red-600 text-gray-400 hover:text-white text-[11px] rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-red-500"
                                 >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
                                     삭제
                                 </button>
                             </div>

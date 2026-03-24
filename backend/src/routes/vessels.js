@@ -27,6 +27,78 @@ function validatePositionFields({ lat, lon, sog, cog, heading }) {
 export default function vesselRoutes(prisma) {
   const router = Router();
 
+  // Search vessels via Datalastic API (by name or IMO)
+  router.get("/search", async (req, res) => {
+    try {
+      const q = (req.query.q || "").trim();
+      if (!q || q.length < 2) {
+        return res.status(400).json({ error: "검색어는 2자 이상 입력해주세요" });
+      }
+
+      // IMO 번호인지 판별 (7자리 숫자)
+      const isIMO = /^\d{7}$/.test(q);
+
+      let result;
+      if (isIMO) {
+        // IMO로 단일 선박 조회
+        result = await apiCall("vessel_info", { imo: q });
+        if (result && result.data) {
+          const d = result.data;
+          return res.json([{
+            name: d.name || "Unknown",
+            mmsi: d.mmsi || null,
+            imo: d.imo || q,
+            type: d.type_specific || d.vessel_type || null,
+            country: d.home_port || d.country || null,
+            flag: d.flag || null,
+          }]);
+        }
+        return res.json([]);
+      }
+
+      // MMSI 번호인지 판별 (9자리 숫자)
+      const isMMSI = /^\d{9}$/.test(q);
+      if (isMMSI) {
+        result = await apiCall("vessel_info", { mmsi: q });
+        if (result && result.data) {
+          const d = result.data;
+          return res.json([{
+            name: d.name || "Unknown",
+            mmsi: d.mmsi || q,
+            imo: d.imo || null,
+            type: d.type_specific || d.vessel_type || null,
+            country: d.home_port || d.country || null,
+            flag: d.flag || null,
+          }]);
+        }
+        return res.json([]);
+      }
+
+      // 선박명으로 검색
+      result = await apiCall("vessel_find", { name: q });
+      if (!result || !result.data) {
+        return res.json([]);
+      }
+
+      const vessels = (Array.isArray(result.data) ? result.data : [result.data])
+        .filter((d) => d.mmsi)
+        .slice(0, 20)
+        .map((d) => ({
+          name: d.name || "Unknown",
+          mmsi: d.mmsi || null,
+          imo: d.imo || null,
+          type: d.type_specific || d.vessel_type || null,
+          country: d.home_port || d.country || null,
+          flag: d.flag || null,
+        }));
+
+      res.json(vessels);
+    } catch (e) {
+      console.error("Vessel search error:", e.message);
+      res.status(500).json({ error: "검색 중 오류가 발생했습니다" });
+    }
+  });
+
   // List all vessels
   router.get("/", async (req, res) => {
     try {

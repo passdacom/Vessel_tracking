@@ -104,7 +104,7 @@ function PlaybackMapController({ position, follow }) {
     return null;
 }
 
-export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true, zoneOpacity = 0.15, selectedRegions, toggleSelectedRegion, trackHours, selectedPort, portPanTrigger, playbackVesselId, playback, playbackFollow }) {
+export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, zoneSettings, trackHours, selectedPort, portPanTrigger, playbackVesselId, playback, playbackFollow }) {
     const [zoom, setZoom] = useState(5);
     const isPlayback = !!playbackVesselId;
     const pbState = playback?.playbackState;
@@ -123,7 +123,7 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                 maxZoom={19}
             />
             <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} selectedPort={selectedPort} portPanTrigger={portPanTrigger} />
-            <RestrictedZone visible={showRestrictedZone} opacityValue={zoneOpacity} selectedRegions={selectedRegions} toggleSelectedRegion={toggleSelectedRegion} />
+            <RestrictedZone zoneSettings={zoneSettings} />
 
             <ZoomListener setZoom={setZoom} />
 

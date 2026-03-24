@@ -1,11 +1,12 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { GeoJSON } from "react-leaflet";
+import { DEFAULT_ZONE } from "../ZoneSettingsPanel.jsx";
 
 /**
- * Persian Gulf + Gulf of Oman 제한 해역 오버레이
- * 데이터 출처: Marine Regions / IHO Sea Areas (해안선 정밀 클리핑)
+ * War Risk Zone + 12NM Territorial Waters 오버레이
+ * zoneSettings: { [featureName]: { visible, color, opacity } }
  */
-export default function RestrictedZone({ visible = true, opacityValue = 0.15, selectedRegions, toggleSelectedRegion }) {
+export default function RestrictedZone({ zoneSettings = {} }) {
   const [geoData, setGeoData] = useState(null);
   const [territorialData, setTerritorialData] = useState(null);
 
@@ -24,65 +25,54 @@ export default function RestrictedZone({ visible = true, opacityValue = 0.15, se
       .catch((e) => console.error("12NM boundary load error:", e));
   }, []);
 
-  const getStyle = (feature) => {
-    let featureOpacity = opacityValue;
-    if (selectedRegions && selectedRegions.length > 0) {
-      if (feature.properties && selectedRegions.includes(feature.properties.name)) {
-         featureOpacity = opacityValue;
-      } else {
-         featureOpacity = 0.15;
-      }
+  const getSetting = useCallback((name) => {
+    return { ...DEFAULT_ZONE, ...zoneSettings[name] };
+  }, [zoneSettings]);
+
+  const getStyle = useCallback((feature) => {
+    const name = feature.properties?.name;
+    const s = getSetting(name);
+
+    if (!s.visible) {
+      return { opacity: 0, fillOpacity: 0, weight: 0 };
     }
+
     return {
-      color: "#ef4444",
+      color: s.color,
       weight: 1.5,
-      opacity: Math.min(1, featureOpacity + 0.35),
-      fillColor: "#ef4444",
-      fillOpacity: featureOpacity,
+      opacity: Math.min(1, s.opacity + 0.35),
+      fillColor: s.color,
+      fillOpacity: s.opacity,
       dashArray: "6, 4",
     };
-  };
+  }, [getSetting]);
 
+  // zoneSettings 변경 시 스타일 재적용
   useEffect(() => {
-    if (geoRef.current) {
-        geoRef.current.setStyle(getStyle);
-    }
-    if (territorialRef.current) {
-        territorialRef.current.setStyle(getStyle);
-    }
-  }, [selectedRegions, opacityValue]);
+    if (geoRef.current) geoRef.current.setStyle(getStyle);
+    if (territorialRef.current) territorialRef.current.setStyle(getStyle);
+  }, [zoneSettings, getStyle]);
 
-  if (!visible) return null;
+  // 모든 zone이 숨겨져 있으면 렌더링 스킵
+  const anyVisible = Object.values(zoneSettings).some((s) => s.visible !== false);
+  // zoneSettings가 비어있으면 기본값(visible=true)이므로 렌더링
+  if (Object.keys(zoneSettings).length > 0 && !anyVisible) return null;
 
   return (
     <>
       {geoData && (
         <GeoJSON
           ref={geoRef}
-          key={`jwc-${JSON.stringify(geoData.features?.length || geoData)}`}
+          key={`jwc-${geoData.features?.length || 0}`}
           data={geoData}
-          onEachFeature={(feature, layer) => {
-            layer.on("click", (e) => {
-              if (feature.properties && feature.properties.name) {
-                toggleSelectedRegion(feature.properties.name);
-              }
-            });
-          }}
           style={getStyle}
         />
       )}
       {territorialData && (
         <GeoJSON
           ref={territorialRef}
-          key={`12nm-${JSON.stringify(territorialData.features?.length || territorialData)}`}
+          key={`12nm-${territorialData.features?.length || 0}`}
           data={territorialData}
-          onEachFeature={(feature, layer) => {
-            layer.on("click", (e) => {
-              if (feature.properties && feature.properties.name) {
-                toggleSelectedRegion(feature.properties.name);
-              }
-            });
-          }}
           style={getStyle}
         />
       )}

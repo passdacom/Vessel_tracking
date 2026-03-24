@@ -9,6 +9,7 @@ import GroupManageModal from "./components/GroupManageModal.jsx";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import usePlayback from "./hooks/usePlayback.js";
 import PlaybackPanel from "./components/PlaybackPanel.jsx";
+import ZoneSettingsPanel from "./components/ZoneSettingsPanel.jsx";
 
 function ReportTable({ vessels, positions }) {
   const now = new Date().toUTCString();
@@ -127,9 +128,13 @@ function App() {
     setIsAuthed(false);
   };
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
-  const [showRestrictedZone, setShowRestrictedZone] = useState(true);
-  const [zoneOpacity, setZoneOpacity] = useState(0.15); // New state for HRA opacity
-  const [selectedRegions, setSelectedRegions] = useState([]); // New state for per-region opacity
+  const [showZoneSettings, setShowZoneSettings] = useState(false);
+  const [zoneSettings, setZoneSettings] = useState(() => {
+    try {
+      const stored = localStorage.getItem("vessel_zone_settings");
+      return stored ? JSON.parse(stored) : {};
+    } catch { return {}; }
+  });
 
   // New state for custom groups
   const [customGroups, setCustomGroups] = useState(() => {
@@ -145,6 +150,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem("vessel_custom_groups", JSON.stringify(customGroups));
   }, [customGroups]);
+
+  // Persist zone settings
+  useEffect(() => {
+    localStorage.setItem("vessel_zone_settings", JSON.stringify(zoneSettings));
+  }, [zoneSettings]);
 
   const handleAddCustomGroup = (groupName) => {
     if (!groupName) return;
@@ -192,16 +202,6 @@ function App() {
     }
   };
 
-  const handleToggleRegion = (regionName) => {
-    setSelectedRegions((prev) => {
-      if (prev.includes(regionName)) {
-        return prev.filter((r) => r !== regionName);
-      } else {
-        return [...prev, regionName];
-      }
-    });
-  };
-
   const handleToggleVessel = (id) => {
     setHiddenVessels(prev => {
       const next = new Set(prev);
@@ -220,8 +220,6 @@ function App() {
       setHiddenVessels(prev => { const next = new Set(prev); activeIds.forEach(id => next.add(id)); return next; });
     }
   };
-
-  const handleToggleZone = () => setShowRestrictedZone(v => !v);
 
   const trackHoursRef = useRef(trackHours);
   trackHoursRef.current = trackHours;
@@ -413,12 +411,7 @@ function App() {
         hiddenVessels={hiddenVessels}
         onToggleVessel={handleToggleVessel}
         onToggleAllVessels={handleToggleAllVessels}
-        showRestrictedZone={showRestrictedZone}
-        onToggleZone={handleToggleZone}
-        zoneOpacity={zoneOpacity}
-        onZoneOpacityChange={setZoneOpacity}
-        selectedRegions={selectedRegions}
-        onClearSelectedRegions={() => setSelectedRegions([])}
+        onOpenZoneSettings={() => setShowZoneSettings(true)}
         customGroups={customGroups}
         selectedPort={selectedPort}
         onSelectPort={handleSelectPort}
@@ -433,10 +426,7 @@ function App() {
           selectedVesselId={selectedVesselId}
           panTrigger={panTrigger}
           onSelectVessel={handleSelectVessel}
-          showRestrictedZone={showRestrictedZone}
-          zoneOpacity={zoneOpacity}
-          selectedRegions={selectedRegions}
-          toggleSelectedRegion={handleToggleRegion}
+          zoneSettings={zoneSettings}
           trackHours={trackHours}
           selectedPort={selectedPort}
           portPanTrigger={portPanTrigger}
@@ -457,7 +447,7 @@ function App() {
       </div>
 
       {showAddModal && (
-        <AddVesselModal onAdd={handleAddVessel} onClose={() => setShowAddModal(false)} existingCount={vessels.length} customGroups={customGroups} />
+        <AddVesselModal onAdd={handleAddVessel} onClose={() => setShowAddModal(false)} existingCount={vessels.length} customGroups={customGroups} apiFetch={apiFetch} />
       )}
       {showSharePanel && (
         <SharePanel
@@ -478,6 +468,13 @@ function App() {
           onAddGroup={handleAddCustomGroup}
           onRenameGroup={handleRenameGroup}
           onDeleteGroup={handleDeleteGroup}
+        />
+      )}
+      {showZoneSettings && (
+        <ZoneSettingsPanel
+          zoneSettings={zoneSettings}
+          onUpdate={setZoneSettings}
+          onClose={() => setShowZoneSettings(false)}
         />
       )}
     </div>

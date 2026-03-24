@@ -4,12 +4,26 @@ import ApiUpdateModal from "../ApiUpdateModal.jsx";
 import ArchivedVesselsModal from "../ArchivedVesselsModal.jsx";
 import PortList from "./PortList.jsx";
 
-const TRACK_OPTIONS = [
-    { label: "1h", value: 1 },
+// 빠른 선택 버튼 (자주 사용)
+const TRACK_QUICK = [
     { label: "6h", value: 6 },
     { label: "24h", value: 24 },
+    { label: "3d", value: 72 },
     { label: "7d", value: 168 },
-    { label: "30d", value: 720 },
+];
+// 드롭다운 전체 옵션
+const TRACK_ALL = [
+    { label: "1시간", value: 1 },
+    { label: "3시간", value: 3 },
+    { label: "6시간", value: 6 },
+    { label: "12시간", value: 12 },
+    { label: "24시간", value: 24 },
+    { label: "2일", value: 48 },
+    { label: "3일", value: 72 },
+    { label: "5일", value: 120 },
+    { label: "7일", value: 168 },
+    { label: "14일", value: 336 },
+    { label: "30일", value: 720 },
 ];
 
 /* ── 데스크탑: 기존 사이드바 ── */
@@ -18,9 +32,8 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     onSelectVessel, selectedVesselId, wsConnected,
     onShowShare, onLogout, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
-    showRestrictedZone, onToggleZone, zoneOpacity, onZoneOpacityChange,
-    selectedRegions, onClearSelectedRegions, customGroups = [],
-    apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched }) {
+    customGroups = [],
+    apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched, onOpenZoneSettings }) {
 
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
     const [showArchiveModal, setShowArchiveModal] = useState(false);
@@ -117,14 +130,27 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
             </div>
 
             <div className="px-3 py-2.5 border-b border-gray-700">
-                <p className="text-gray-400 text-xs mb-2">Track Period</p>
-                <div className="flex gap-1">
-                    {TRACK_OPTIONS.map((opt) => (
+                <div className="flex items-center gap-1.5">
+                    {TRACK_QUICK.map((opt) => (
                         <button key={opt.value} onClick={() => onTrackHoursChange(opt.value)}
                             className={`flex-1 py-1 text-xs rounded transition ${trackHours === opt.value ? "bg-blue-600 text-white font-medium" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}>
                             {opt.label}
                         </button>
                     ))}
+                    <select
+                        value={TRACK_QUICK.some(o => o.value === trackHours) ? "" : trackHours}
+                        onChange={(e) => { if (e.target.value) onTrackHoursChange(parseInt(e.target.value)); }}
+                        className={`w-14 py-1 text-xs rounded border text-center cursor-pointer ${
+                            !TRACK_QUICK.some(o => o.value === trackHours)
+                                ? "bg-blue-600 text-white border-blue-500 font-medium"
+                                : "bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600"
+                        }`}
+                    >
+                        <option value="" disabled hidden>+</option>
+                        {TRACK_ALL.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                    </select>
                 </div>
             </div>
             <PortList apiFetch={apiFetch} onSelectPort={onSelectPort} selectedPort={selectedPort} />
@@ -239,43 +265,14 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
             )}
 
             <div className="px-3 py-2.5 border-t border-gray-700">
-                <div className="flex flex-col gap-2 relative">
-                    <button
-                    onClick={onToggleZone}
-                    className={`w-full py-2 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 ${showRestrictedZone ? "bg-red-900 hover:bg-red-800 text-red-200 border border-red-700" : "bg-gray-700 hover:bg-gray-600 text-gray-400"}`}
-                    >
-                    <span style={{ fontSize: 13 }}>{showRestrictedZone ? "🔴" : "⬜"}</span>
-                    War Risk Zone {showRestrictedZone ? "ON" : "OFF"}
-                    </button>
-                    
-                    {/* Opacity Slider */}
-                    {showRestrictedZone && (
-                      <div className="flex flex-col gap-1 w-full bg-slate-800 p-2 rounded-lg border border-slate-700">
-                        {selectedRegions && selectedRegions.length > 0 && (
-                            <div className="flex justify-between items-center bg-blue-900/40 px-2 py-1 mb-1 border border-blue-800 rounded">
-                                <span className="text-[10px] text-blue-200 font-medium truncate pr-2">
-                                  📍 {selectedRegions.length === 1 ? selectedRegions[0] : `${selectedRegions.length}개 구역 선택됨`}
-                                </span>
-                                <button onClick={onClearSelectedRegions} className="text-[10px] text-blue-400 hover:text-blue-100 flex-shrink-0 font-bold" title="전체 선택으로 돌아가기">✕</button>
-                            </div>
-                        )}
-                        <div className="flex justify-between items-center text-[10px] text-gray-400 font-semibold px-1">
-                          <span>{selectedRegions && selectedRegions.length > 0 ? "선택 구역 투명도" : "전체 투명도"}</span>
-                          <span>{Math.round(zoneOpacity * 100)}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="1"
-                          step="0.1"
-                          value={zoneOpacity}
-                          onChange={(e) => onZoneOpacityChange(parseFloat(e.target.value))}
-                          className="w-full h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-red-500"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <button
+                    onClick={onOpenZoneSettings}
+                    className="w-full py-2 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 bg-red-900 hover:bg-red-800 text-red-200 border border-red-700"
+                >
+                    <span style={{ fontSize: 13 }}>🔴</span>
+                    War Risk Zone 설정
+                </button>
+            </div>
             <div className="px-3 py-3 border-t border-gray-700">
                 <button onClick={() => window.print()} className="w-full py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
@@ -302,9 +299,8 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
     onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel, onArchiveVessel, onRestoreVessel,
     onSelectVessel, selectedVesselId, wsConnected, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
-    showRestrictedZone, onToggleZone, zoneOpacity, onZoneOpacityChange,
-    selectedRegions, onClearSelectedRegions, customGroups = [],
-    apiFetch, onStartPlayback, onHistoryFetched }) {
+    customGroups = [],
+    apiFetch, onStartPlayback, onHistoryFetched, onOpenZoneSettings }) {
 
     const [open, setOpen] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
@@ -417,9 +413,8 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                 flexDirection: "column"
             }}>
                 <div style={{ padding: "12px 12px 6px", borderBottom: "1px solid #374151", flexShrink: 0 }}>
-                    <p style={{ color: "#9ca3af", fontSize: 11, marginBottom: 6 }}>Track Period</p>
-                    <div style={{ display: "flex", gap: 6 }}>
-                        {TRACK_OPTIONS.map((opt) => (
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                        {TRACK_QUICK.map((opt) => (
                             <button key={opt.value} onClick={() => onTrackHoursChange(opt.value)}
                                 style={{
                                     flex: 1, padding: "5px 0", fontSize: 11, borderRadius: 6, border: "none",
@@ -430,6 +425,22 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                                 {opt.label}
                             </button>
                         ))}
+                        <select
+                            value={TRACK_QUICK.some(o => o.value === trackHours) ? "" : trackHours}
+                            onChange={(e) => { if (e.target.value) onTrackHoursChange(parseInt(e.target.value)); }}
+                            style={{
+                                width: 48, padding: "5px 2px", fontSize: 11, borderRadius: 6, textAlign: "center",
+                                cursor: "pointer", fontWeight: !TRACK_QUICK.some(o => o.value === trackHours) ? 700 : 400,
+                                background: !TRACK_QUICK.some(o => o.value === trackHours) ? "#2563eb" : "#374151",
+                                color: !TRACK_QUICK.some(o => o.value === trackHours) ? "#fff" : "#d1d5db",
+                                border: !TRACK_QUICK.some(o => o.value === trackHours) ? "1px solid #3b82f6" : "1px solid #4b5563",
+                            }}
+                        >
+                            <option value="" disabled hidden>+</option>
+                            {TRACK_ALL.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
                     </div>
                 </div>
 
