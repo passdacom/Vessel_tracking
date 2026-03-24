@@ -165,8 +165,8 @@ export default function ApiUpdateModal({ onClose, apiFetch, vessels = [] }) {
                 {/* 모달 콘텐츠 */}
                 <div className="p-5 flex-1 flex flex-col overflow-hidden">
 
-                    {/* 1. 인증 단계 */}
-                    {step === 'auth' && (
+                    {/* 1. 인증 단계 (ready = 세션 유효, 비밀번호만 재입력) */}
+                    {(step === 'auth' || step === 'ready') && (
                         <div className="flex-1 flex flex-col overflow-hidden">
                             <h4 className="text-white text-base font-bold mb-1 text-center">API 즉시 수신 (Datalastic)</h4>
                             <p className="text-gray-400 text-xs text-center mb-4">
@@ -247,7 +247,7 @@ export default function ApiUpdateModal({ onClose, apiFetch, vessels = [] }) {
                     )}
 
                     {/* 2. 실행 로그 뷰어 단계 */}
-                    {step !== 'auth' && (
+                    {(step === 'running' || step === 'done' || step === 'error') && (
                         <div className="flex-1 bg-black rounded-lg border border-gray-800 p-4 font-mono text-sm overflow-hidden flex flex-col shadow-inner">
                             <div className="flex-1 overflow-y-auto pr-2">
                                 <div className="text-green-500 opacity-70 mb-4 whitespace-pre text-[10px] leading-tight">{`   _____       __        __           __  _     

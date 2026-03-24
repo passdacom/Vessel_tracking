@@ -48,9 +48,10 @@ export default function VesselCard({
     onSelect,
     onDelete,
     onUpdate,
-    onPan,
+    onArchive,
     isVisible = true,
     onToggleVisible,
+    customGroups = [],
 }) {
     const [editing, setEditing] = useState(false);
     const [alias, setAlias] = useState(vessel.alias || vessel.name || '');
@@ -284,36 +285,36 @@ export default function VesselCard({
                                     그룹 변경 <span className="text-gray-500">({vessel.companyType || '자사간사'})</span>
                                 </button>
                                 {showGroupChange && (
-                                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-10 overflow-hidden">
-                                        {['자사간사', '타사간사'].map(type => (
-                                            <button
-                                                key={type}
-                                                onClick={(e) => { e.stopPropagation(); handleGroupChange(type); }}
-                                                className={`w-full px-3 py-2.5 text-xs text-left transition flex items-center gap-2 ${
-                                                    (vessel.companyType || '자사간사') === type
-                                                        ? type === '자사간사' ? 'bg-blue-700 text-white' : 'bg-orange-700 text-white'
-                                                        : 'hover:bg-gray-700 text-gray-300'
-                                                }`}
-                                            >
-                                                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${type === '자사간사' ? 'bg-blue-400' : 'bg-orange-400'}`} />
-                                                {type === '자사간사' ? '🏢 자사간사' : '🚢 타사간사'}
-                                                {(vessel.companyType || '자사간사') === type && <span className="ml-auto text-xs">✓ 현재</span>}
-                                            </button>
-                                        ))}
-                                    </div>
+                                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl z-10 overflow-hidden max-h-48 overflow-y-auto">
+                                        {['자사간사', '타사간사', ...customGroups].map(type => {
+                                            const isCurrent = (vessel.companyType || '자사간사') === type;
+                                            return (
+                                                <button
+                                                    key={type}
+                                                    onClick={(e) => { e.stopPropagation(); handleGroupChange(type); }}
+                                                    className={`w-full px-3 py-2.5 text-xs text-left transition flex items-center gap-2 ${
+                                                        isCurrent ? 'bg-blue-700 text-white' : 'hover:bg-gray-700 text-gray-300'
+                                                    }`}
+                                                >
+                                                    <span className="w-2 h-2 rounded-full flex-shrink-0 bg-blue-400" />
+                                                    {type}
+                                                    {isCurrent && <span className="ml-auto text-xs">✓ 현재</span>}
+                                                </button>
+                                            );
+                                        })}</div>
                                 )}
                             </div>
-                            {/* 이동 / 삭제 버튼 한 줄 */}
+                            {/* 보관 / 삭제 버튼 한 줄 */}
                             <div className="flex gap-2 pt-0.5">
                                 <button
-                                    onClick={(e) => { e.stopPropagation(); if (onPan) onPan(); }}
-                                    className="flex-1 py-1.5 bg-gray-700 hover:bg-blue-600 text-blue-300 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
+                                    onClick={(e) => { e.stopPropagation(); if (onArchive) onArchive(); }}
+                                    className="flex-1 py-1.5 bg-gray-700 hover:bg-amber-700 text-gray-400 hover:text-amber-200 text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-amber-600"
+                                    title="폴링 중단 후 보관함으로 이동"
                                 >
-                                    {/* 지도 아이콘 */}
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2L19 8M10 12v4m4-4v4" />
                                     </svg>
-                                    이동
+                                    보관
                                 </button>
                                 <button
                                     onClick={(e) => {
@@ -323,7 +324,6 @@ export default function VesselCard({
                                     }}
                                     className="flex-1 py-1.5 bg-gray-700 hover:bg-red-600 text-gray-400 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-red-500"
                                 >
-                                    {/* 삭제 아이콘 */}
                                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                                     </svg>

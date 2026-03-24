@@ -67,6 +67,8 @@ function App() {
   const [showGroupManageModal, setShowGroupManageModal] = useState(false);
   const [selectedVesselId, setSelectedVesselId] = useState(null);
   const [panTrigger, setPanTrigger] = useState(0);
+  const [selectedPort, setSelectedPort] = useState(null);
+  const [portPanTrigger, setPortPanTrigger] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
   const [isAuthed, setIsAuthed] = useState(() => {
     const auth = localStorage.getItem("vessel_auth");
@@ -179,12 +181,13 @@ function App() {
   };
 
   const handleToggleAllVessels = () => {
-    if (hiddenVessels.size === vessels.length) {
-      // 모두 숨겨져 있으면 -> 모두 표시
-      setHiddenVessels(new Set());
+    const activeVessels = vessels.filter(v => v.active !== false);
+    const activeIds = activeVessels.map(v => v.id);
+    const allActiveHidden = activeIds.every(id => hiddenVessels.has(id));
+    if (allActiveHidden) {
+      setHiddenVessels(prev => { const next = new Set(prev); activeIds.forEach(id => next.delete(id)); return next; });
     } else {
-      // 하나라도 보이면 -> 전체 숨기기
-      setHiddenVessels(new Set(vessels.map(v => v.id)));
+      setHiddenVessels(prev => { const next = new Set(prev); activeIds.forEach(id => next.add(id)); return next; });
     }
   };
 
@@ -302,6 +305,23 @@ function App() {
     if (selectedVesselId === id) setSelectedVesselId(null);
   };
 
+  const handleArchiveVessel = async (id) => {
+    const res = await apiFetch(`/vessels/${id}`, { method: "PATCH", body: JSON.stringify({ active: false }) });
+    if (res.ok) {
+      const updated = await res.json();
+      setVessels((prev) => prev.map((v) => (v.id === updated.id ? { ...v, ...updated } : v)));
+      if (selectedVesselId === id) setSelectedVesselId(null);
+    }
+  };
+
+  const handleRestoreVessel = async (id) => {
+    const res = await apiFetch(`/vessels/${id}`, { method: "PATCH", body: JSON.stringify({ active: true }) });
+    if (res.ok) {
+      const updated = await res.json();
+      setVessels((prev) => prev.map((v) => (v.id === updated.id ? { ...v, ...updated } : v)));
+    }
+  };
+
   const handleUpdateVessel = async (id, updates) => {
     const res = await apiFetch(`/vessels/${id}`, { method: "PATCH", body: JSON.stringify(updates) });
     if (res.ok) {
@@ -329,11 +349,13 @@ function App() {
   };
 
   const handleSelectVessel = (id) => {
-    if (selectedVesselId === id && id !== null) {
-      setPanTrigger((p) => p + 1);
-    } else {
-      setSelectedVesselId(id);
-    }
+    setSelectedVesselId(id);
+    if (id !== null) setPanTrigger((p) => p + 1);
+  };
+
+  const handleSelectPort = (port) => {
+    setSelectedPort(port);
+    if (port) setPortPanTrigger((p) => p + 1);
   };
 
   if (!isAuthed) return <LoginPage onLogin={handleLogin} />;
@@ -349,6 +371,8 @@ function App() {
         onManualEntry={() => setShowManualModal(true)}
         onManageGroups={() => setShowGroupManageModal(true)}
         onDeleteVessel={handleDeleteVessel}
+        onArchiveVessel={handleArchiveVessel}
+        onRestoreVessel={handleRestoreVessel}
         onUpdateVessel={handleUpdateVessel}
         onSelectVessel={handleSelectVessel}
         selectedVesselId={selectedVesselId}
@@ -366,11 +390,13 @@ function App() {
         selectedRegions={selectedRegions}
         onClearSelectedRegions={() => setSelectedRegions([])}
         customGroups={customGroups}
+        selectedPort={selectedPort}
+        onSelectPort={handleSelectPort}
       />
 
       <div className="flex-1 relative mobile-map-wrapper">
         <Map
-          vessels={vessels.filter(v => !hiddenVessels.has(v.id))}
+          vessels={vessels.filter(v => v.active !== false && !hiddenVessels.has(v.id))}
           positions={positions}
           selectedVesselId={selectedVesselId}
           panTrigger={panTrigger}
@@ -380,12 +406,14 @@ function App() {
           selectedRegions={selectedRegions}
           toggleSelectedRegion={handleToggleRegion}
           trackHours={trackHours}
+          selectedPort={selectedPort}
+          portPanTrigger={portPanTrigger}
         />
-        <ReportTable vessels={vessels} positions={positions} />
+        <ReportTable vessels={vessels.filter(v => v.active !== false)} positions={positions} />
       </div>
 
       {showAddModal && (
-        <AddVesselModal onAdd={handleAddVessel} onClose={() => setShowAddModal(false)} existingCount={vessels.length} />
+        <AddVesselModal onAdd={handleAddVessel} onClose={() => setShowAddModal(false)} existingCount={vessels.length} customGroups={customGroups} />
       )}
       {showSharePanel && (
         <SharePanel

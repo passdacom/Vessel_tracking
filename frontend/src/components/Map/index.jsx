@@ -4,6 +4,7 @@ import VesselMarker from "./VesselMarker.jsx";
 import VesselTrack from "./VesselTrack.jsx";
 import RestrictedZone from "./RestrictedZone.jsx";
 import DraggableVesselLabel from "./DraggableVesselLabel.jsx";
+import PortMarker from "./PortMarker.jsx";
 
 // 겹침 방지: 지정된 순서 옵션 (상단, 왼쪽, 오른쪽) - 3방향으로 축소
 function computeDynamicOffsets(vessels, positions, zoom) {
@@ -66,15 +67,19 @@ function computeDynamicOffsets(vessels, positions, zoom) {
     return offsets;
 }
 
-function MapController({ selectedVesselId, panTrigger, vessels, positions }) {
+function MapController({ selectedVesselId, panTrigger, vessels, positions, selectedPort, portPanTrigger }) {
     const map = useMap();
     useEffect(() => {
         if (!selectedVesselId || panTrigger === 0) return;
         const vessel = vessels.find((v) => v.id === selectedVesselId);
         if (!vessel) return;
         const pos = positions[vessel.id]?.[0];
-        if (pos) map.flyTo([pos.lat, pos.lon], Math.max(map.getZoom(), 10), { duration: 1.2 });
+        if (pos) map.flyTo([pos.lat, pos.lon], map.getZoom(), { duration: 1.2 });
     }, [panTrigger]); // eslint-disable-line
+    useEffect(() => {
+        if (!selectedPort || portPanTrigger === 0) return;
+        map.flyTo([selectedPort.lat, selectedPort.lon], map.getZoom(), { duration: 1.2 });
+    }, [portPanTrigger]); // eslint-disable-line
     return null;
 }
 
@@ -88,7 +93,7 @@ function ZoomListener({ setZoom }) {
     return null;
 }
 
-export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true, zoneOpacity = 0.15, selectedRegions, toggleSelectedRegion, trackHours }) {
+export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true, zoneOpacity = 0.15, selectedRegions, toggleSelectedRegion, trackHours, selectedPort, portPanTrigger }) {
     const [zoom, setZoom] = useState(5);
 
     return (
@@ -104,10 +109,14 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                 subdomains="abcd"
                 maxZoom={19}
             />
-            <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} />
+            <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} selectedPort={selectedPort} portPanTrigger={portPanTrigger} />
             <RestrictedZone visible={showRestrictedZone} opacityValue={zoneOpacity} selectedRegions={selectedRegions} toggleSelectedRegion={toggleSelectedRegion} />
 
             <ZoomListener setZoom={setZoom} />
+
+            {selectedPort && (
+                <PortMarker key={selectedPort.id} port={selectedPort} onClick={() => {}} />
+            )}
 
             {vessels.map((vessel) => {
                 const vesselPositions = positions[vessel.id] || [];

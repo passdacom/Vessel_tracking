@@ -5,7 +5,7 @@ const COLORS = [
   '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f59e0b',
 ];
 
-export default function AddVesselModal({ onAdd, onClose, existingCount }) {
+export default function AddVesselModal({ onAdd, onClose, existingCount, customGroups = [] }) {
   const [mmsi, setMmsi] = useState('');
   const [alias, setAlias] = useState('');
   const [color, setColor] = useState(COLORS[existingCount % COLORS.length]);
@@ -90,21 +90,21 @@ export default function AddVesselModal({ onAdd, onClose, existingCount }) {
           {/* 소속 그룹 선택 */}
           <div>
             <label className="text-gray-400 text-sm block mb-2">소속 그룹</label>
-            <div className="flex gap-2">
-              {['자사간사', '타사간사'].map((type) => {
+            <div className="flex flex-wrap gap-2">
+              {['자사간사', '타사간사', ...customGroups].map((type) => {
                 const isActive = companyType === type;
-                const activeClass = type === '자사간사'
-                  ? 'bg-blue-600 border-blue-500 text-white'
-                  : 'bg-orange-600 border-orange-500 text-white';
-                const inactiveClass = 'bg-gray-700 border-gray-600 text-gray-400 hover:text-white hover:border-gray-500';
                 return (
                   <button
                     key={type}
                     type="button"
                     onClick={() => setCompanyType(type)}
-                    className={`flex-1 py-2 rounded-lg text-sm font-semibold border transition ${isActive ? activeClass : inactiveClass}`}
+                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition ${
+                      isActive
+                        ? 'bg-blue-600 border-blue-500 text-white'
+                        : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-white hover:border-gray-500'
+                    }`}
                   >
-                    {type === '자사간사' ? '🏢 자사간사' : '🚢 타사간사'}
+                    {type}
                   </button>
                 );
               })}

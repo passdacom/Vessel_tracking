@@ -154,10 +154,11 @@ export default function vesselRoutes(prisma) {
       const id = parseId(req.params.id);
       if (!id) return res.status(400).json({ error: "Invalid vessel ID" });
 
-      const { alias, color, companyType } = req.body;
+      const { alias, color, companyType, active } = req.body;
       if (alias && alias.length > 100) return res.status(400).json({ error: "Alias는 100자 이하여야 합니다" });
       if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) return res.status(400).json({ error: "색상은 #RRGGBB 형식이어야 합니다" });
       if (companyType && companyType.length > 100) return res.status(400).json({ error: "그룹명은 100자 이하여야 합니다" });
+      if (active !== undefined && typeof active !== "boolean") return res.status(400).json({ error: "active는 boolean이어야 합니다" });
 
       const vessel = await prisma.vessel.update({
         where: { id },
@@ -165,6 +166,7 @@ export default function vesselRoutes(prisma) {
           ...(alias !== undefined && { alias: alias || null }),
           ...(color !== undefined && { color }),
           ...(companyType !== undefined && { companyType }),
+          ...(active !== undefined && { active }),
         },
       });
       req.app.locals.wsServer?.broadcast({ type: "vessel_updated", data: vessel });

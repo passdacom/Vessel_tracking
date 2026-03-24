@@ -29,6 +29,7 @@ model Vessel {
   speedAvg     Float?
   speedMax     Float?
   infoFetched  Boolean    @default(false)
+  active       Boolean    @default(true)
   createdAt    DateTime   @default(now())
   positions    Position[]
 }
@@ -68,6 +69,17 @@ model Incident {
   link         String?
   source       String?
   createdAt    DateTime @default(now())
+}
+
+model Port {
+  id         Int      @id @default(autoincrement())
+  name       String
+  nameKo     String?
+  unlocode   String?  @unique
+  lat        Float
+  lon        Float
+  country    String?
+  createdAt  DateTime @default(now())
 }
 
 model SharedView {

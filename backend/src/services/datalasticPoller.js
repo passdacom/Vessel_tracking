@@ -109,7 +109,7 @@ export function createDatalasticPoller(prisma, onPosition) {
 
   // ── 위치 + 항해 정보 수집 (vessel, 스케줄 폴링) ──
   async function pollPositions() {
-    const vessels = await prisma.vessel.findMany();
+    const vessels = await prisma.vessel.findMany({ where: { active: true } });
     if (vessels.length === 0) return;
     const now = new Date();
     console.log(`[Datalastic] 📡 Polling ${vessels.length} vessel(s) at ${now.toISOString()}`);
@@ -184,7 +184,7 @@ export function createDatalasticPoller(prisma, onPosition) {
   return {
     async forceUpdate(logger, mmsiList = null) {
       if (logger) logger("▶ 시작: 수동 강제 업데이트 작업을 시작합니다...");
-      let vessels = await prisma.vessel.findMany();
+      let vessels = await prisma.vessel.findMany({ where: { active: true } });
       if (vessels.length === 0) {
         if (logger) logger("⚠ 등록된 선박이 없습니다.");
         return;

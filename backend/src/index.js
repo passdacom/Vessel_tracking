@@ -6,6 +6,7 @@ import { createServer } from "http";
 import { PrismaClient } from "@prisma/client";
 import vesselRoutes from "./routes/vessels.js";
 import sharesRoutes from "./routes/shares.js";
+import portRoutes from "./routes/ports.js";
 import { createWsServer } from "./services/wsServer.js";
 import { createDatalasticPoller } from "./services/datalasticPoller.js";
 import { startCleanupJob } from "./services/cleanup.js";
@@ -42,6 +43,7 @@ app.use((req, res, next) => {
 
 app.use("/api/vessels", vesselRoutes(prisma));
 app.use("/api/shares", sharesRoutes(prisma));
+app.use("/api/ports", portRoutes(prisma));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 // 수동 강제 업데이트 API (FORCE_UPDATE_PASSWORD 요구)

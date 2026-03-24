@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import VesselCard from "./VesselCard.jsx";
 import ApiUpdateModal from "../ApiUpdateModal.jsx";
+import ArchivedVesselsModal from "../ArchivedVesselsModal.jsx";
+import PortList from "./PortList.jsx";
 
 const TRACK_OPTIONS = [
     { label: "1h", value: 1 },
@@ -12,14 +14,16 @@ const TRACK_OPTIONS = [
 
 /* ── 데스크탑: 기존 사이드바 ── */
 function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
-    onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel,
+    onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel, onArchiveVessel, onRestoreVessel,
     onSelectVessel, selectedVesselId, wsConnected,
     onShowShare, onLogout, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     showRestrictedZone, onToggleZone, zoneOpacity, onZoneOpacityChange,
-    selectedRegions, onClearSelectedRegions, customGroups = [] }) {
+    selectedRegions, onClearSelectedRegions, customGroups = [],
+    apiFetch, selectedPort, onSelectPort }) {
 
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+    const [showArchiveModal, setShowArchiveModal] = useState(false);
 
     const toggleCollapse = (groupName, e) => {
         // Prevent toggle when clicking the "Hide/Show Group" button inside the header
@@ -32,16 +36,19 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
         });
     };
 
-    const activeCount = vessels.filter((v) => {
+    const activeVessels = vessels.filter(v => v.active !== false);
+    const archivedCount = vessels.filter(v => v.active === false).length;
+
+    const activeCount = activeVessels.filter((v) => {
         const pos = positions[v.id]?.[0];
         return pos && Date.now() - new Date(pos.timestamp) < 2 * 60 * 60 * 1000;
     }).length;
 
-    // Build dynamic groups based on companyType + customGroups
+    // Build dynamic groups based on companyType + customGroups (active vessels only)
     const groupMap = {};
     const allGroupNames = new Set(["자사간사", "타사간사", ...customGroups]);
-    
-    vessels.forEach(v => {
+
+    activeVessels.forEach(v => {
         const gLabel = v.companyType || "자사간사";
         allGroupNames.add(gLabel);
         if (!groupMap[gLabel]) groupMap[gLabel] = [];
@@ -71,10 +78,11 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
             isSelected={selectedVesselId === vessel.id}
             onSelect={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
             onDelete={() => onDeleteVessel(vessel.id)}
+            onArchive={() => onArchiveVessel && onArchiveVessel(vessel.id)}
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
-            onPan={() => onSelectVessel(vessel.id)}
             isVisible={!hiddenVessels.has(vessel.id)}
-            onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)} />
+            onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)}
+            customGroups={customGroups} />
     ));
 
     return (
@@ -85,7 +93,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                         <span className="text-2xl">⚓</span>
                         <div>
                             <h1 className="text-white font-bold text-base leading-tight">Vessel Tracker</h1>
-                            <p className="text-gray-400 text-xs">{activeCount}/{vessels.length} Active</p>
+                            <p className="text-gray-400 text-xs">{activeCount}/{activeVessels.length} Active</p>
                         </div>
                     </div>
                     <div className={`w-2.5 h-2.5 rounded-full ${wsConnected ? "bg-green-400" : "bg-red-400"}`} title={wsConnected ? "Connected" : "Disconnected"} />
@@ -116,31 +124,33 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                     ))}
                 </div>
             </div>
-            {vessels.length > 0 && (
+            <PortList apiFetch={apiFetch} onSelectPort={onSelectPort} selectedPort={selectedPort} />
+
+            {activeVessels.length > 0 && (
                 <div className="px-2 py-1.5 border-b border-gray-700 flex items-center gap-2">
                     <button
                         onClick={onToggleAllVessels}
-                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${hiddenVessels.size === vessels.length
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${activeVessels.every(v => hiddenVessels.has(v.id))
                             ? "bg-gray-700 hover:bg-gray-600 text-gray-400"
                             : "bg-blue-600 hover:bg-blue-700 text-white"
                             }`}
                     >
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            {hiddenVessels.size === vessels.length
+                            {activeVessels.every(v => hiddenVessels.has(v.id))
                                 ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
                                 : <><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></>
                             }
                         </svg>
-                        {hiddenVessels.size === vessels.length ? "전체 표시" : "전체 숨기기"}
+                        {activeVessels.every(v => hiddenVessels.has(v.id)) ? "전체 표시" : "전체 숨기기"}
                     </button>
                     <span className="text-gray-600 text-xs">
-                        {vessels.length - hiddenVessels.size}/{vessels.length} 표시중
+                        {activeVessels.filter(v => !hiddenVessels.has(v.id)).length}/{activeVessels.length} 표시중
                     </span>
                 </div>
             )}
 
             <div className="flex-1 overflow-y-auto p-2 space-y-4">
-                {vessels.length === 0 ? (
+                {activeVessels.length === 0 ? (
                     <div className="text-center text-gray-500 mt-12 px-4">
                         <p className="text-4xl mb-3">🚢</p>
                         <p className="text-sm font-medium text-gray-400">No vessels registered</p>
@@ -203,6 +213,28 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                 )}
             </div>
 
+            {archivedCount > 0 && (
+                <div className="px-3 py-1.5 border-t border-gray-800">
+                    <button
+                        onClick={() => setShowArchiveModal(true)}
+                        className="w-full text-left text-gray-600 hover:text-gray-400 text-xs transition flex items-center gap-1.5"
+                    >
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2L19 8M10 12v4m4-4v4" />
+                        </svg>
+                        보관함 ({archivedCount}척) ›
+                    </button>
+                </div>
+            )}
+            {showArchiveModal && (
+                <ArchivedVesselsModal
+                    vessels={vessels}
+                    onRestore={(id) => { onRestoreVessel && onRestoreVessel(id); }}
+                    onDelete={(id) => { onDeleteVessel(id); }}
+                    onClose={() => setShowArchiveModal(false)}
+                />
+            )}
+
             <div className="px-3 py-2.5 border-t border-gray-700">
                 <div className="flex flex-col gap-2 relative">
                     <button
@@ -264,7 +296,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
 
 /* ── 모바일: 하단 드로어 ── */
 function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
-    onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel,
+    onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel, onArchiveVessel, onRestoreVessel,
     onSelectVessel, selectedVesselId, wsConnected, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     showRestrictedZone, onToggleZone, zoneOpacity, onZoneOpacityChange,
@@ -272,6 +304,7 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
 
     const [open, setOpen] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+    const [showArchiveModal, setShowArchiveModal] = useState(false);
 
     const toggleCollapse = (groupName, e) => {
         if (e && e.target.closest('button')) return;
@@ -283,16 +316,19 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
         });
     };
 
-    const activeCount = vessels.filter((v) => {
+    const activeVessels = vessels.filter(v => v.active !== false);
+    const archivedCount = vessels.filter(v => v.active === false).length;
+
+    const activeCount = activeVessels.filter((v) => {
         const pos = positions[v.id]?.[0];
         return pos && Date.now() - new Date(pos.timestamp) < 2 * 60 * 60 * 1000;
     }).length;
 
-    // Build dynamic groups based on companyType + customGroups
+    // Build dynamic groups based on companyType + customGroups (active vessels only)
     const groupMap = {};
     const allGroupNames = new Set(["자사간사", "타사간사", ...customGroups]);
-    
-    vessels.forEach(v => {
+
+    activeVessels.forEach(v => {
         const gLabel = v.companyType || "자사간사";
         allGroupNames.add(gLabel);
         if (!groupMap[gLabel]) groupMap[gLabel] = [];
@@ -312,10 +348,11 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
             isSelected={selectedVesselId === vessel.id}
             onSelect={() => { onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id); setOpen(false); }}
             onDelete={() => onDeleteVessel(vessel.id)}
+            onArchive={() => onArchiveVessel && onArchiveVessel(vessel.id)}
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
-            onPan={() => { onSelectVessel(vessel.id); setOpen(false); }}
             isVisible={!hiddenVessels.has(vessel.id)}
-            onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)} />
+            onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)}
+            customGroups={customGroups} />
     ));
 
     return (
@@ -330,7 +367,7 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                     <span style={{ fontSize: 20 }}>⚓</span>
                     <div>
                         <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, lineHeight: 1.2 }}>Vessel Tracker</div>
-                        <div style={{ color: "#9ca3af", fontSize: 10 }}>{activeCount}/{vessels.length} Active</div>
+                        <div style={{ color: "#9ca3af", fontSize: 10 }}>{activeCount}/{activeVessels.length} Active</div>
                     </div>
                     <div style={{
                         width: 8, height: 8, borderRadius: "50%",
@@ -389,22 +426,22 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                     </div>
                 </div>
 
-                {vessels.length > 0 && (
+                {activeVessels.length > 0 && (
                     <div style={{ padding: "8px 12px", borderBottom: "1px solid #374151", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
                         <button onClick={onToggleAllVessels} style={{
-                            background: hiddenVessels.size === vessels.length ? "#374151" : "#2563eb",
+                            background: activeVessels.every(v => hiddenVessels.has(v.id)) ? "#374151" : "#2563eb",
                             color: "#fff", border: "none", borderRadius: 4, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer"
                         }}>
-                            {hiddenVessels.size === vessels.length ? "전체 표시" : "전체 숨기기"}
+                            {activeVessels.every(v => hiddenVessels.has(v.id)) ? "전체 표시" : "전체 숨기기"}
                         </button>
                         <span style={{ fontSize: 11, color: "#9ca3af" }}>
-                            {vessels.length - hiddenVessels.size}/{vessels.length} 표시중
+                            {activeVessels.filter(v => !hiddenVessels.has(v.id)).length}/{activeVessels.length} 표시중
                         </span>
                     </div>
                 )}
 
                 <div style={{ flex: 1, overflowY: "auto", padding: "12px 8px" }}>
-                    {vessels.length === 0 ? (
+                    {activeVessels.length === 0 ? (
                         <div style={{ textAlign: "center", color: "#6b7280", paddingTop: 24 }}>
                             <p style={{ fontSize: 32 }}>🚢</p>
                             <p style={{ fontSize: 13 }}>No vessels registered</p>
@@ -446,6 +483,16 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                     )}
                 </div>
 
+                {archivedCount > 0 && (
+                    <div style={{ padding: "4px 12px", borderTop: "1px solid #1f2937", flexShrink: 0 }}>
+                        <button
+                            onClick={() => setShowArchiveModal(true)}
+                            style={{ background: "none", border: "none", color: "#4b5563", fontSize: 11, cursor: "pointer", padding: "4px 0" }}
+                        >
+                            🗃 보관함 ({archivedCount}척) ›
+                        </button>
+                    </div>
+                )}
                 <div style={{ padding: "8px 12px", borderTop: "1px solid #374151", flexShrink: 0, display: "flex", gap: "6px" }}>
                     <button onClick={() => window.print()} style={{
                         flex: 1, padding: "8px", background: "#374151",
@@ -459,6 +506,14 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                     }}>🔄 강제 수신</button>
                 </div>
             </div>
+            {showArchiveModal && (
+                <ArchivedVesselsModal
+                    vessels={vessels}
+                    onRestore={(id) => { onRestoreVessel && onRestoreVessel(id); }}
+                    onDelete={(id) => { onDeleteVessel(id); }}
+                    onClose={() => setShowArchiveModal(false)}
+                />
+            )}
         </>
     );
 }
@@ -487,7 +542,7 @@ export default function Sidebar(props) {
 
     return (
         <>
-            {isMobile ? <MobileDrawer {...props} /> : <DesktopSidebar {...props} />}
+            {isMobile ? <MobileDrawer {...props} /> : <DesktopSidebar {...props} apiFetch={props.apiFetch} selectedPort={props.selectedPort} onSelectPort={props.onSelectPort} />}
             {showApiModal && (
                 <ApiUpdateModal
                     onClose={() => setShowApiModal(false)}
