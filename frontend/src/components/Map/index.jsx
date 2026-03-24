@@ -93,8 +93,21 @@ function ZoomListener({ setZoom }) {
     return null;
 }
 
-export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true, zoneOpacity = 0.15, selectedRegions, toggleSelectedRegion, trackHours, selectedPort, portPanTrigger }) {
+// 재생 중 자동 추적
+function PlaybackMapController({ position, follow }) {
+    const map = useMap();
+    useEffect(() => {
+        if (follow && position) {
+            map.panTo([position.lat, position.lon], { animate: false });
+        }
+    }, [position?.lat, position?.lon, follow]); // eslint-disable-line
+    return null;
+}
+
+export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, showRestrictedZone = true, zoneOpacity = 0.15, selectedRegions, toggleSelectedRegion, trackHours, selectedPort, portPanTrigger, playbackVesselId, playback, playbackFollow }) {
     const [zoom, setZoom] = useState(5);
+    const isPlayback = !!playbackVesselId;
+    const pbState = playback?.playbackState;
 
     return (
         <MapContainer
@@ -114,11 +127,41 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
 
             <ZoomListener setZoom={setZoom} />
 
+            {/* 재생 중 자동 추적 */}
+            {isPlayback && pbState?.currentPosition && (
+                <PlaybackMapController position={pbState.currentPosition} follow={playbackFollow} />
+            )}
+
             {selectedPort && (
                 <PortMarker key={selectedPort.id} port={selectedPort} onClick={() => {}} />
             )}
 
             {vessels.map((vessel) => {
+                const isPlaybackTarget = isPlayback && vessel.id === playbackVesselId;
+
+                // 재생 대상 선박: 재생 위치로 마커/트랙 교체
+                if (isPlaybackTarget && pbState?.currentPosition) {
+                    const elapsed = pbState.elapsedPositions || [];
+                    return (
+                        <React.Fragment key={vessel.id}>
+                            <VesselTrack positions={elapsed} color={vessel.color} />
+                            <VesselMarker
+                                vessel={vessel}
+                                position={pbState.currentPosition}
+                                isSelected={true}
+                                onClick={() => {}}
+                                trackHours={trackHours}
+                            />
+                            <DraggableVesselLabel
+                                vessel={vessel}
+                                position={pbState.currentPosition}
+                                trackHours={trackHours}
+                            />
+                        </React.Fragment>
+                    );
+                }
+
+                // 일반 선박 (재생 중이 아닌 다른 선박 포함)
                 const vesselPositions = positions[vessel.id] || [];
                 const latest = vesselPositions[0];
 
@@ -134,7 +177,6 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                                     onClick={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
                                     trackHours={trackHours}
                                 />
-                                {/* 드래그 가능한 선박명 라벨 */}
                                 <DraggableVesselLabel
                                     vessel={vessel}
                                     position={latest}

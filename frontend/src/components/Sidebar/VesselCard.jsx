@@ -52,12 +52,18 @@ export default function VesselCard({
     isVisible = true,
     onToggleVisible,
     customGroups = [],
+    apiFetch,
+    onStartPlayback,
+    onHistoryFetched,
 }) {
     const [editing, setEditing] = useState(false);
     const [alias, setAlias] = useState(vessel.alias || vessel.name || '');
     const [color, setColor] = useState(vessel.color);
     const [showInfo, setShowInfo] = useState(false); // 선박정보 토글
     const [showGroupChange, setShowGroupChange] = useState(false); // 그룹변경 드롭다운
+    const [historyDays, setHistoryDays] = useState(7);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyResult, setHistoryResult] = useState(null);
 
     const displayName = vessel.alias || vessel.name || vessel.mmsi;
     const stale =
@@ -78,6 +84,29 @@ export default function VesselCard({
         : latestPosition?.cog != null
             ? formatDeg(latestPosition.cog)
             : '---°';
+
+    async function handleFetchHistory(e) {
+        e.stopPropagation();
+        if (!apiFetch) return;
+        setHistoryLoading(true);
+        setHistoryResult(null);
+        try {
+            const res = await apiFetch(`/vessels/${vessel.id}/history`, {
+                method: 'POST',
+                body: JSON.stringify({ days: historyDays }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setHistoryResult(`${data.stored}건 저장 (${data.credits_used} 크레딧 소모)`);
+                if (onHistoryFetched) onHistoryFetched(vessel.id);
+            } else {
+                setHistoryResult(`오류: ${data.error}`);
+            }
+        } catch {
+            setHistoryResult('네트워크 오류');
+        }
+        setHistoryLoading(false);
+    }
 
     function handleGroupChange(newType) {
         onUpdate({ companyType: newType });
@@ -272,6 +301,48 @@ export default function VesselCard({
                                     </div>
                                 </div>
                             )}
+
+                            {/* ── 히스토리 가져오기 + 항적 재생 ── */}
+                            <div className="flex gap-2 pt-0.5">
+                                {/* 항적 재생 */}
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); if (onStartPlayback) onStartPlayback(vessel.id); }}
+                                    className="flex-1 py-1.5 bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white text-xs rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
+                                    title="DB에 저장된 항적을 재생합니다"
+                                >
+                                    <span>▶</span> 항적 재생
+                                </button>
+                            </div>
+
+                            {/* 히스토리 가져오기 (API) */}
+                            <div className="bg-gray-750 rounded p-2 border border-gray-700 space-y-1.5">
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs text-gray-400 whitespace-nowrap">히스토리</span>
+                                    <select
+                                        value={historyDays}
+                                        onChange={(e) => { e.stopPropagation(); setHistoryDays(parseInt(e.target.value)); }}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="bg-gray-700 text-white text-xs rounded px-1.5 py-1 border border-gray-600 flex-shrink-0"
+                                    >
+                                        {[1, 3, 5, 7, 14, 30].map(d => (
+                                            <option key={d} value={d}>{d}일</option>
+                                        ))}
+                                    </select>
+                                    <span className="text-[10px] text-gray-500">({historyDays} 크레딧)</span>
+                                    <button
+                                        onClick={handleFetchHistory}
+                                        disabled={historyLoading}
+                                        className="ml-auto px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-600 text-white text-xs rounded transition flex-shrink-0"
+                                    >
+                                        {historyLoading ? '...' : '가져오기'}
+                                    </button>
+                                </div>
+                                {historyResult && (
+                                    <div className={`text-[10px] ${historyResult.startsWith('오류') || historyResult === '네트워크 오류' ? 'text-red-400' : 'text-green-400'}`}>
+                                        {historyResult}
+                                    </div>
+                                )}
+                            </div>
 
                             {/* 그룹 변경 */}
                             <div className="relative mb-1">

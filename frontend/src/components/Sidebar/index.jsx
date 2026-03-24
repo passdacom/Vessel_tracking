@@ -20,7 +20,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     showRestrictedZone, onToggleZone, zoneOpacity, onZoneOpacityChange,
     selectedRegions, onClearSelectedRegions, customGroups = [],
-    apiFetch, selectedPort, onSelectPort }) {
+    apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched }) {
 
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
     const [showArchiveModal, setShowArchiveModal] = useState(false);
@@ -82,7 +82,10 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
             isVisible={!hiddenVessels.has(vessel.id)}
             onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)}
-            customGroups={customGroups} />
+            customGroups={customGroups}
+            apiFetch={apiFetch}
+            onStartPlayback={onStartPlayback}
+            onHistoryFetched={onHistoryFetched} />
     ));
 
     return (
@@ -300,7 +303,8 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
     onSelectVessel, selectedVesselId, wsConnected, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     showRestrictedZone, onToggleZone, zoneOpacity, onZoneOpacityChange,
-    selectedRegions, onClearSelectedRegions, customGroups = [] }) {
+    selectedRegions, onClearSelectedRegions, customGroups = [],
+    apiFetch, onStartPlayback, onHistoryFetched }) {
 
     const [open, setOpen] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
@@ -352,7 +356,10 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
             isVisible={!hiddenVessels.has(vessel.id)}
             onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)}
-            customGroups={customGroups} />
+            customGroups={customGroups}
+            apiFetch={apiFetch}
+            onStartPlayback={onStartPlayback}
+            onHistoryFetched={onHistoryFetched} />
     ));
 
     return (

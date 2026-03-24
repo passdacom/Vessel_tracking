@@ -30,6 +30,16 @@ const forceUpdateLimiter = rateLimit({
 });
 app.use("/api/force-update", forceUpdateLimiter);
 
+// history fetch: 15분 내 10회 초과 → 429 (API 크레딧 소모 방지)
+const historyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many history requests, please try again later" },
+});
+app.use("/api/vessels/:id/history", historyLimiter);
+
 // 공유 링크 공개 조회(/api/shares/view/*)만 인증 제외, 나머지는 필수 인증
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/shares/view/")) return next();

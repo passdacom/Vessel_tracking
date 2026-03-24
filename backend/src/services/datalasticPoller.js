@@ -28,7 +28,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
  * @param {Date}   newTime - 새 타임스탬프
  * @returns {{ suspicious: boolean, impliedSpeed: number|null, reason: string|null }}
  */
-function checkSpoofing(prevPos, newLat, newLon, newTime) {
+export function checkSpoofing(prevPos, newLat, newLon, newTime) {
   if (!prevPos) return { suspicious: false, impliedSpeed: null, reason: null };
 
   const distKm = haversineKm(prevPos.lat, prevPos.lon, newLat, newLon);
@@ -51,8 +51,8 @@ function checkSpoofing(prevPos, newLat, newLon, newTime) {
   return { suspicious: false, impliedSpeed: Math.round(impliedSpeed * 10) / 10, reason: null };
 }
 
-// API 호출 헬퍼 (1 크레딧 소모)
-function apiCall(endpoint, params) {
+// API 호출 헬퍼 (1 크레딧 소모) — 외부에서도 사용 가능하도록 export
+export function apiCall(endpoint, params) {
   const apiKey = process.env.DATALASTIC_API_KEY;
   if (!apiKey) return Promise.resolve(null);
   const qs = new URLSearchParams({ "api-key": apiKey, ...params }).toString();

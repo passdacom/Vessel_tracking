@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { VESSEL_COLORS } from "../utils/colors.js";
+import { apiCall, checkSpoofing } from "../services/datalasticPoller.js";
 
 /** parseInt 실패(NaN, 음수) 시 null 반환 */
 function parseId(idStr) {
@@ -173,6 +174,96 @@ export default function vesselRoutes(prisma) {
       res.json(vessel);
     } catch (e) {
       if (e.code === "P2025") return res.status(404).json({ error: "Vessel not found" });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // Fetch historical positions from Datalastic API
+  router.post("/:id/history", async (req, res) => {
+    try {
+      const id = parseId(req.params.id);
+      if (!id) return res.status(400).json({ error: "Invalid vessel ID" });
+
+      const days = Math.min(Math.max(parseInt(req.body.days) || 7, 1), 30);
+
+      const vessel = await prisma.vessel.findUnique({ where: { id } });
+      if (!vessel) return res.status(404).json({ error: "Vessel not found" });
+
+      if (!vessel.imo && !vessel.mmsi) {
+        return res.status(400).json({ error: "선박의 IMO 또는 MMSI가 필요합니다" });
+      }
+
+      const params = vessel.imo ? { imo: vessel.imo, days } : { mmsi: vessel.mmsi, days };
+      const result = await apiCall("vessel_hist", params);
+
+      if (!result || (!result.data && !Array.isArray(result))) {
+        return res.status(502).json({ error: "Datalastic API 응답 없음", credits_used: days });
+      }
+
+      // Datalastic vessel_hist 응답: data 배열 또는 최상위 배열
+      const records = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
+
+      if (records.length === 0) {
+        return res.json({ fetched: 0, stored: 0, credits_used: days });
+      }
+
+      let stored = 0;
+      // 시간순 정렬 (오래된 것부터 — 스푸핑 체크 위해)
+      const sorted = records
+        .filter(r => {
+          const lat = parseFloat(r.lat);
+          const lon = parseFloat(r.lon);
+          return !isNaN(lat) && !isNaN(lon) && (lat !== 0 || lon !== 0);
+        })
+        .sort((a, b) => {
+          const tA = a.last_position_epoch || a.timestamp_epoch || 0;
+          const tB = b.last_position_epoch || b.timestamp_epoch || 0;
+          return tA - tB;
+        });
+
+      for (const r of sorted) {
+        const lat = parseFloat(r.lat);
+        const lon = parseFloat(r.lon);
+        const cog = parseFloat(r.course) || null;
+        const sog = parseFloat(r.speed) || null;
+        const heading = r.heading != null && r.heading !== 511 ? parseInt(r.heading) : null;
+        const navStatus = r.navigation_status || null;
+        const destination = r.destination || null;
+        const eta = r.eta_UTC ? new Date(r.eta_UTC) : null;
+        const epoch = r.last_position_epoch || r.timestamp_epoch;
+        const timestamp = epoch ? new Date(epoch * 1000) : null;
+
+        if (!timestamp || isNaN(timestamp.getTime())) continue;
+
+        // 스푸핑 체크: 직전 정상 위치 조회
+        const prevPos = await prisma.position.findFirst({
+          where: { vesselId: id, suspicious: false, timestamp: { lt: timestamp } },
+          orderBy: { timestamp: "desc" },
+          select: { lat: true, lon: true, timestamp: true },
+        });
+        const { suspicious, impliedSpeed, reason } = checkSpoofing(prevPos, lat, lon, timestamp);
+
+        try {
+          await prisma.position.upsert({
+            where: { vesselId_timestamp: { vesselId: id, timestamp } },
+            create: {
+              vesselId: id,
+              lat, lon, cog, sog, heading,
+              navStatus, destination, eta, timestamp,
+              suspicious, impliedSpeed, spoofReason: reason,
+            },
+            update: {},
+          });
+          stored++;
+        } catch {
+          // 중복 등 개별 레코드 실패 시 스킵
+        }
+      }
+
+      console.log(`[History] Fetched ${records.length} records for vessel ${id} (${vessel.name || vessel.mmsi}), stored ${stored}, cost ${days} credits`);
+      res.json({ fetched: records.length, stored, credits_used: days });
+    } catch (e) {
+      console.error("[History] Error:", e.message);
       res.status(500).json({ error: "Internal server error" });
     }
   });

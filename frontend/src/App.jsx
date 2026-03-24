@@ -7,6 +7,8 @@ import AddVesselModal from "./components/AddVesselModal.jsx";
 import ManualPositionModal from "./components/ManualPositionModal.jsx";
 import GroupManageModal from "./components/GroupManageModal.jsx";
 import { useWebSocket } from "./hooks/useWebSocket.js";
+import usePlayback from "./hooks/usePlayback.js";
+import PlaybackPanel from "./components/PlaybackPanel.jsx";
 
 function ReportTable({ vessels, positions }) {
   const now = new Date().toUTCString();
@@ -69,6 +71,34 @@ function App() {
   const [panTrigger, setPanTrigger] = useState(0);
   const [selectedPort, setSelectedPort] = useState(null);
   const [portPanTrigger, setPortPanTrigger] = useState(0);
+  // ── 항적 재생 상태 ──
+  const [playbackVesselId, setPlaybackVesselId] = useState(null);
+  const [playbackFollow, setPlaybackFollow] = useState(true);
+  const playback = usePlayback(playbackVesselId ? positions[playbackVesselId] : null);
+
+  const handleStartPlayback = (vesselId) => {
+    setPlaybackVesselId(vesselId);
+    setPlaybackFollow(true);
+    setSelectedVesselId(vesselId);
+  };
+
+  const handleStopPlayback = () => {
+    playback.controls.stop();
+    setPlaybackVesselId(null);
+  };
+
+  // 히스토리 가져오기 후 positions 새로고침
+  const handleHistoryFetched = async (vesselId) => {
+    const vessel = vessels.find((v) => v.id === vesselId);
+    if (vessel) {
+      const res = await apiFetch(`/vessels/${vesselId}/positions?hours=${trackHoursRef.current}`);
+      if (res.ok) {
+        const pos = await res.json();
+        setPositions((prev) => ({ ...prev, [vesselId]: pos }));
+      }
+    }
+  };
+
   const [wsConnected, setWsConnected] = useState(false);
   const [isAuthed, setIsAuthed] = useState(() => {
     const auth = localStorage.getItem("vessel_auth");
@@ -392,6 +422,8 @@ function App() {
         customGroups={customGroups}
         selectedPort={selectedPort}
         onSelectPort={handleSelectPort}
+        onStartPlayback={handleStartPlayback}
+        onHistoryFetched={handleHistoryFetched}
       />
 
       <div className="flex-1 relative mobile-map-wrapper">
@@ -408,8 +440,20 @@ function App() {
           trackHours={trackHours}
           selectedPort={selectedPort}
           portPanTrigger={portPanTrigger}
+          playbackVesselId={playbackVesselId}
+          playback={playback}
+          playbackFollow={playbackFollow}
         />
         <ReportTable vessels={vessels.filter(v => v.active !== false)} positions={positions} />
+        {playbackVesselId && (
+          <PlaybackPanel
+            vessel={vessels.find((v) => v.id === playbackVesselId)}
+            playback={playback}
+            follow={playbackFollow}
+            onFollowToggle={() => setPlaybackFollow((f) => !f)}
+            onClose={handleStopPlayback}
+          />
+        )}
       </div>
 
       {showAddModal && (
