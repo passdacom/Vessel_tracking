@@ -25,17 +25,22 @@ export default function AdminDashboard({ apiFetch, onLogout }) {
   const [overview, setOverview] = useState(null);
   const [vessels, setVessels] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedAccount, setSelectedAccount] = useState(null); // null = all
+  const [selectedAccount, setSelectedAccount] = useState(null);
   const [actionMsg, setActionMsg] = useState("");
+  const [accounts, setAccounts] = useState([]);
+  const [showPwChange, setShowPwChange] = useState(null); // account name
+  const [newPw, setNewPw] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
-      const [ovRes, vsRes] = await Promise.all([
+      const [ovRes, vsRes, acRes] = await Promise.all([
         apiFetch("/admin/overview"),
         apiFetch("/admin/vessels"),
+        apiFetch("/admin/accounts"),
       ]);
       if (ovRes.ok) setOverview(await ovRes.json());
       if (vsRes.ok) setVessels(await vsRes.json());
+      if (acRes.ok) setAccounts(await acRes.json());
     } catch (e) {
       console.error("Admin fetch error:", e);
     }
@@ -66,6 +71,22 @@ export default function AdminDashboard({ apiFetch, onLogout }) {
       fetchData();
     } else {
       setActionMsg("삭제 실패");
+    }
+    setTimeout(() => setActionMsg(""), 3000);
+  };
+
+  const handleChangePassword = async (accountName) => {
+    if (!newPw || newPw.length < 4) { setActionMsg("비밀번호는 4자 이상"); return; }
+    const res = await apiFetch(`/admin/accounts/${accountName}/password`, {
+      method: "PATCH",
+      body: JSON.stringify({ newPassword: newPw }),
+    });
+    if (res.ok) {
+      setActionMsg(`${accountName} 비밀번호 변경 완료`);
+      setShowPwChange(null);
+      setNewPw("");
+    } else {
+      setActionMsg("변경 실패");
     }
     setTimeout(() => setActionMsg(""), 3000);
   };
@@ -177,6 +198,45 @@ export default function AdminDashboard({ apiFetch, onLogout }) {
                   </div>
                   <div className="text-2xl font-bold text-gray-400">{acct.vesselCount}</div>
                 </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 계정 비밀번호 관리 */}
+        {accounts.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <h2 className="text-sm font-semibold text-gray-300 mb-3">계정 비밀번호 관리</h2>
+            <div className="space-y-2">
+              {accounts.map((acct) => (
+                <div key={acct.name} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
+                  <div>
+                    <span className="text-sm font-medium text-white">{acct.name.toUpperCase()}</span>
+                    <span className="text-xs text-gray-500 ml-2">{acct.role}</span>
+                  </div>
+                  {showPwChange === acct.name ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={newPw}
+                        onChange={(e) => setNewPw(e.target.value)}
+                        placeholder="새 비밀번호"
+                        className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 w-32"
+                        autoFocus
+                        onKeyDown={(e) => { if (e.key === "Enter") handleChangePassword(acct.name); }}
+                      />
+                      <button onClick={() => handleChangePassword(acct.name)} className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded">변경</button>
+                      <button onClick={() => { setShowPwChange(null); setNewPw(""); }} className="text-xs px-2 py-1 bg-gray-700 text-gray-400 rounded">취소</button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setShowPwChange(acct.name); setNewPw(""); }}
+                      className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 rounded transition"
+                    >
+                      비밀번호 변경
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </div>

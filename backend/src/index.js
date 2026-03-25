@@ -11,54 +11,78 @@ import adminRoutes from "./routes/admin.js";
 import { createWsServer } from "./services/wsServer.js";
 import { createDatalasticPoller } from "./services/datalasticPoller.js";
 import { startCleanupJob } from "./services/cleanup.js";
-import { authenticate } from "./accounts.js";
+import { authenticate, clearAccountCache } from "./accounts.js";
 
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS: 실제 인증은 Bearer 토큰이 담당. Nginx→Docker→Express 프록시 구조상
-// 브라우저 Origin이 서버 IP가 되어 whitelist 방식이 동작하지 않음.
 app.use(cors({ origin: true, credentials: false }));
 app.use(express.json());
 
-// force-update: 15분 내 5회 초과 → 429 (API 크레딧 소모 방지 + 브루트포스 방지)
 const forceUpdateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000, max: 5, standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many update requests, please try again later" },
 });
 app.use("/api/force-update", forceUpdateLimiter);
 
-// history fetch: 15분 내 10회 초과 → 429 (API 크레딧 소모 방지)
 const historyLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
+  windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
   message: { error: "Too many history requests, please try again later" },
 });
 app.use("/api/vessels/:id/history", historyLimiter);
 
-// 인증 엔드포인트 (로그인 시 계정 정보 반환)
-app.post("/api/auth", (req, res) => {
+// 인증 엔드포인트
+app.post("/api/auth", async (req, res) => {
   const { password } = req.body;
-  const account = authenticate(password);
+  const account = await authenticate(prisma, password);
   if (!account) return res.status(401).json({ error: "Invalid password" });
   res.json({ account: account.name, role: account.role });
 });
 
-// 공유 링크 공개 조회(/api/shares/view/*)만 인증 제외, 나머지는 필수 인증
-app.use((req, res, next) => {
+// 비밀번호 변경 엔드포인트
+app.post("/api/account/change-password", async (req, res) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  const account = token ? await authenticate(prisma, token) : null;
+  if (!account) return res.status(401).json({ error: "Unauthorized" });
+
+  const { targetAccount, newPassword } = req.body;
+  if (!newPassword || newPassword.length < 4) {
+    return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다" });
+  }
+  if (newPassword.length > 50) {
+    return res.status(400).json({ error: "비밀번호는 50자 이하여야 합니다" });
+  }
+
+  // 일반 유저는 자기 비밀번호만, admin은 모든 계정
+  const target = targetAccount || account.name;
+  if (account.role !== "admin" && target !== account.name) {
+    return res.status(403).json({ error: "자신의 비밀번호만 변경할 수 있습니다" });
+  }
+
+  try {
+    await prisma.account.update({
+      where: { name: target },
+      data: { password: newPassword },
+    });
+    clearAccountCache();
+    res.json({ success: true, message: `${target} 계정의 비밀번호가 변경되었습니다` });
+  } catch (e) {
+    if (e.code === "P2025") return res.status(404).json({ error: "계정을 찾을 수 없습니다" });
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// 인증 미들웨어
+app.use(async (req, res, next) => {
   if (req.path.startsWith("/api/shares/view/")) return next();
   if (req.path === "/api/auth") return next();
+  if (req.path === "/api/account/change-password") return next();
   const token = req.headers.authorization?.split(" ")[1];
-  const account = token ? authenticate(token) : null;
+  const account = token ? await authenticate(prisma, token) : null;
   if (!account) return res.status(401).json({ error: "Unauthorized" });
-  req.account = account.name;  // "kb", "kdgc", "admin"
-  req.accountRole = account.role; // "user", "admin"
+  req.account = account.name;
+  req.accountRole = account.role;
   next();
 });
 
@@ -77,13 +101,9 @@ app.post("/api/force-update", async (req, res) => {
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Transfer-Encoding', 'chunked');
-
-  const logger = (msg) => {
-    res.write(msg + '\n');
-  };
+  const logger = (msg) => { res.write(msg + '\n'); };
 
   try {
-    // mmsiList가 있으면 해당 선박만, 없으면 전체 갱신
     if (mmsiList && Array.isArray(mmsiList) && mmsiList.length > 0) {
       logger(`▶ 선택 선박 ${mmsiList.length}척 갱신: ${mmsiList.join(', ')}`);
       await datalasticPoller.forceUpdate(logger, mmsiList);
@@ -99,19 +119,27 @@ app.post("/api/force-update", async (req, res) => {
 });
 
 const httpServer = createServer(app);
-const wsServer = createWsServer(httpServer);
+const wsServer = createWsServer(httpServer, prisma);
 
-// Datalastic 폴러 초기화
 const datalasticPoller = createDatalasticPoller(prisma, (positionData) => {
   wsServer.broadcast({ type: "position", data: positionData });
 });
 
 async function init() {
-  // wsServer 노출 (라우터에서 브로드캐스트 가능하도록)
   app.locals.wsServer = wsServer;
-
   startCleanupJob(prisma);
   datalasticPoller.start();
+
+  // Seed accounts from ACCOUNTS env var if DB is empty
+  const accountCount = await prisma.account.count();
+  if (accountCount === 0 && process.env.ACCOUNTS) {
+    for (const entry of process.env.ACCOUNTS.split(",")) {
+      const [name, password] = entry.trim().split(":");
+      if (!name || !password) continue;
+      await prisma.account.create({ data: { name, password, role: name === "admin" ? "admin" : "user" } });
+    }
+    console.log("[ACCOUNTS] Seeded from env var");
+  }
 
   const vessels = await prisma.vessel.findMany();
   httpServer.listen(PORT, "0.0.0.0", () => {
@@ -120,13 +148,5 @@ async function init() {
   });
 }
 
-init().catch((e) => {
-  console.error("Failed to start:", e);
-  process.exit(1);
-});
-
-process.on("SIGINT", async () => {
-  datalasticPoller.stop();
-  await prisma.$disconnect();
-  process.exit(0);
-});
+init().catch((e) => { console.error("Failed to start:", e); process.exit(1); });
+process.on("SIGINT", async () => { datalasticPoller.stop(); await prisma.$disconnect(); process.exit(0); });

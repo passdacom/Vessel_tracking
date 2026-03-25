@@ -2,14 +2,14 @@ import { WebSocketServer } from 'ws';
 import { parse } from 'url';
 import { authenticate } from '../accounts.js';
 
-export function createWsServer(httpServer) {
+export function createWsServer(httpServer, prisma) {
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
-  const clients = new Map(); // ws -> { account, role }
+  const clients = new Map();
 
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', async (ws, req) => {
     const { query } = parse(req.url, true);
     const token = query.token;
-    const account = token ? authenticate(token) : null;
+    const account = token ? await authenticate(prisma, token) : null;
     if (!account) {
       ws.close(1008, 'Unauthorized');
       return;
@@ -21,7 +21,6 @@ export function createWsServer(httpServer) {
       clients.delete(ws);
       console.log(`[WS] Client disconnected (${account.name})`);
     });
-
     ws.on('error', (err) => {
       console.error('[WS] Error:', err.message);
       clients.delete(ws);
@@ -29,14 +28,12 @@ export function createWsServer(httpServer) {
   });
 
   return {
-    /** Broadcast to all connected clients */
     broadcast(data) {
       const msg = JSON.stringify(data);
       for (const [client] of clients) {
         if (client.readyState === 1) client.send(msg);
       }
     },
-    /** Broadcast only to clients of a specific account (or admin) */
     broadcastToAccount(data, accountName) {
       const msg = JSON.stringify(data);
       for (const [client, acct] of clients) {

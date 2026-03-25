@@ -1,46 +1,39 @@
 /**
- * Multi-account configuration
- *
- * Env var ACCOUNTS format: "accountName:password,accountName2:password2,..."
- * Example: "kb:kb1234,kdgc:kdgc1234,admin:aa880715"
+ * Multi-account authentication via database
+ * Falls back to ACCOUNTS env var for initial seeding
  */
 
-let accountMap = null; // password -> { name, role }
+let cachedAccounts = null;
+let cacheExpires = 0;
+const CACHE_TTL = 30000; // 30 seconds
 
-function loadAccounts() {
-  if (accountMap) return accountMap;
-  accountMap = new Map();
+/** Load accounts from DB (with short cache) */
+async function loadAccounts(prisma) {
+  if (cachedAccounts && Date.now() < cacheExpires) return cachedAccounts;
 
-  const raw = process.env.ACCOUNTS;
-  if (!raw) {
-    console.error("[ACCOUNTS] ACCOUNTS env var not set!");
-    return accountMap;
+  const rows = await prisma.account.findMany();
+  cachedAccounts = new Map();
+  for (const row of rows) {
+    cachedAccounts.set(row.password, { name: row.name, role: row.role });
   }
+  cacheExpires = Date.now() + CACHE_TTL;
+  return cachedAccounts;
+}
 
-  for (const entry of raw.split(",")) {
-    const [name, password] = entry.trim().split(":");
-    if (!name || !password) continue;
-    const role = name === "admin" ? "admin" : "user";
-    accountMap.set(password, { name, role });
-  }
-
-  console.log(`[ACCOUNTS] Loaded ${accountMap.size} accounts: ${[...accountMap.values()].map(a => a.name).join(", ")}`);
-  return accountMap;
+/** Clear cache (call after password change) */
+export function clearAccountCache() {
+  cachedAccounts = null;
+  cacheExpires = 0;
 }
 
 /** Authenticate password -> { name, role } or null */
-export function authenticate(password) {
-  const accounts = loadAccounts();
+export async function authenticate(prisma, password) {
+  const accounts = await loadAccounts(prisma);
   return accounts.get(password) || null;
 }
 
 /** Get all account names (non-admin) */
-export function getAccountNames() {
-  const accounts = loadAccounts();
+export async function getAccountNames(prisma) {
+  const accounts = await loadAccounts(prisma);
   return [...accounts.values()].filter(a => a.role !== "admin").map(a => a.name);
-}
-
-/** Check if a password is valid */
-export function isValidPassword(password) {
-  return authenticate(password) !== null;
 }

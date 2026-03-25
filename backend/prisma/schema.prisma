@@ -85,6 +85,14 @@ model Port {
   createdAt  DateTime @default(now())
 }
 
+model Account {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique  // "kb", "kdgc", "admin"
+  password  String
+  role      String   @default("user") // "user", "admin"
+  createdAt DateTime @default(now())
+}
+
 model ApiUsage {
   id        Int      @id @default(autoincrement())
   endpoint  String                // e.g. "vessel", "vessel_info", "vessel_find", "vessel_hist"

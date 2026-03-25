@@ -7,6 +7,7 @@ import AddVesselModal from "./components/AddVesselModal.jsx";
 import ManualPositionModal from "./components/ManualPositionModal.jsx";
 import GroupManageModal from "./components/GroupManageModal.jsx";
 import AdminDashboard from "./components/AdminDashboard.jsx";
+import SettingsModal from "./components/SettingsModal.jsx";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import usePlayback from "./hooks/usePlayback.js";
 import PlaybackPanel from "./components/PlaybackPanel.jsx";
@@ -140,6 +141,12 @@ function App() {
   };
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
   const [showZoneSettings, setShowZoneSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const stored = localStorage.getItem("vessel_sidebar_width");
+    return stored ? parseInt(stored, 10) : 288; // 18rem = 288px default
+  });
   const [zoneSettings, setZoneSettings] = useState(() => {
     try {
       const stored = localStorage.getItem("vessel_zone_settings");
@@ -404,38 +411,74 @@ function App() {
     return <AdminDashboard apiFetch={apiFetch} onLogout={handleLogout} />;
   }
 
+  const handleSidebarResize = (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    const onMove = (ev) => {
+      const newWidth = Math.min(500, Math.max(220, startWidth + ev.clientX - startX));
+      setSidebarWidth(newWidth);
+      localStorage.setItem("vessel_sidebar_width", String(newWidth));
+    };
+    const onUp = () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
   return (
     <div className="flex h-screen w-screen overflow-hidden">
-      <Sidebar
-        vessels={vessels}
-        positions={positions}
-        trackHours={trackHours}
-        onTrackHoursChange={setTrackHours}
-        onAddVessel={() => setShowAddModal(true)}
-        onManualEntry={() => setShowManualModal(true)}
-        onManageGroups={() => setShowGroupManageModal(true)}
-        onDeleteVessel={handleDeleteVessel}
-        onArchiveVessel={handleArchiveVessel}
-        onRestoreVessel={handleRestoreVessel}
-        onUpdateVessel={handleUpdateVessel}
-        onSelectVessel={handleSelectVessel}
-        selectedVesselId={selectedVesselId}
-        wsConnected={wsConnected}
-        apiFetch={apiFetch}
-        onShowShare={() => setShowSharePanel(true)}
-        onLogout={handleLogout}
-        hiddenVessels={hiddenVessels}
-        onToggleVessel={handleToggleVessel}
-        onToggleAllVessels={handleToggleAllVessels}
-        onOpenZoneSettings={() => setShowZoneSettings(true)}
-        customGroups={customGroups}
-        selectedPort={selectedPort}
-        onSelectPort={handleSelectPort}
-        onStartPlayback={handleStartPlayback}
-        onHistoryFetched={handleHistoryFetched}
-      />
+      {sidebarVisible && (
+        <>
+          <Sidebar
+            vessels={vessels}
+            positions={positions}
+            trackHours={trackHours}
+            onTrackHoursChange={setTrackHours}
+            onAddVessel={() => setShowAddModal(true)}
+            onManualEntry={() => setShowManualModal(true)}
+            onManageGroups={() => setShowGroupManageModal(true)}
+            onDeleteVessel={handleDeleteVessel}
+            onArchiveVessel={handleArchiveVessel}
+            onRestoreVessel={handleRestoreVessel}
+            onUpdateVessel={handleUpdateVessel}
+            onSelectVessel={handleSelectVessel}
+            selectedVesselId={selectedVesselId}
+            wsConnected={wsConnected}
+            apiFetch={apiFetch}
+            onShowShare={() => setShowSharePanel(true)}
+            onLogout={handleLogout}
+            onOpenSettings={() => setShowSettings(true)}
+            hiddenVessels={hiddenVessels}
+            onToggleVessel={handleToggleVessel}
+            onToggleAllVessels={handleToggleAllVessels}
+            onOpenZoneSettings={() => setShowZoneSettings(true)}
+            customGroups={customGroups}
+            selectedPort={selectedPort}
+            onSelectPort={handleSelectPort}
+            onStartPlayback={handleStartPlayback}
+            onHistoryFetched={handleHistoryFetched}
+            sidebarWidth={sidebarWidth}
+          />
+          {/* 리사이즈 핸들 (데스크탑만) */}
+          <div
+            className="hidden md:flex w-1.5 cursor-col-resize bg-gray-800 hover:bg-blue-600 transition-colors items-center justify-center flex-shrink-0 print:hidden"
+            onMouseDown={handleSidebarResize}
+            title="사이드바 너비 조절"
+          >
+            <div className="w-0.5 h-8 bg-gray-600 rounded" />
+          </div>
+        </>
+      )}
 
       <div className="flex-1 relative mobile-map-wrapper">
+        {/* 사이드바 토글 버튼 */}
+        <button
+          onClick={() => setSidebarVisible((v) => !v)}
+          className="absolute top-3 left-3 z-[900] bg-gray-900/90 hover:bg-gray-800 text-white w-8 h-8 rounded-lg shadow-lg flex items-center justify-center transition print:hidden"
+          title={sidebarVisible ? "사이드바 숨기기" : "사이드바 보기"}
+        >
+          {sidebarVisible ? "◀" : "▶"}
+        </button>
         <Map
           vessels={vessels.filter(v => v.active !== false && !hiddenVessels.has(v.id))}
           positions={positions}
@@ -491,6 +534,14 @@ function App() {
           zoneSettings={zoneSettings}
           onUpdate={setZoneSettings}
           onClose={() => setShowZoneSettings(false)}
+        />
+      )}
+      {showSettings && (
+        <SettingsModal
+          apiFetch={apiFetch}
+          accountName={accountName}
+          onClose={() => setShowSettings(false)}
+          onLogout={handleLogout}
         />
       )}
     </div>

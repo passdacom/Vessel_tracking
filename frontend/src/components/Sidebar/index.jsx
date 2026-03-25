@@ -30,10 +30,11 @@ const TRACK_ALL = [
 function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel, onArchiveVessel, onRestoreVessel,
     onSelectVessel, selectedVesselId, wsConnected,
-    onShowShare, onLogout, onManageGroups,
+    onShowShare, onLogout, onOpenSettings, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     customGroups = [],
-    apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched, onOpenZoneSettings }) {
+    apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched, onOpenZoneSettings,
+    sidebarWidth = 288 }) {
 
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
     const [showArchiveModal, setShowArchiveModal] = useState(false);
@@ -102,7 +103,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     ));
 
     return (
-        <div className="w-72 h-full flex flex-col bg-gray-900 border-r border-gray-700 shadow-2xl flex-shrink-0 print:hidden">
+        <div className="h-full flex flex-col bg-gray-900 border-r border-gray-700 shadow-2xl flex-shrink-0 print:hidden" style={{ width: sidebarWidth }}>
             <div className="p-4 border-b border-gray-700">
                 <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
@@ -285,8 +286,8 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                     <button onClick={onShowShare} className="flex-1 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
                         🔗 공유 링크
                     </button>
-                    <button onClick={onLogout} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="로그아웃">
-                        🔓
+                    <button onClick={onOpenSettings} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="설정">
+                        ⚙️
                     </button>
                 </div>
             </div>
@@ -560,7 +561,7 @@ export default function Sidebar(props) {
 
     return (
         <>
-            {isMobile ? <MobileDrawer {...props} /> : <DesktopSidebar {...props} apiFetch={props.apiFetch} selectedPort={props.selectedPort} onSelectPort={props.onSelectPort} />}
+            {isMobile ? <MobileDrawer {...props} /> : <DesktopSidebar {...props} />}
             {showApiModal && (
                 <ApiUpdateModal
                     onClose={() => setShowApiModal(false)}

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAccountNames } from "../accounts.js";
+import { getAccountNames, clearAccountCache } from "../accounts.js";
 
 export default function adminRoutes(prisma) {
   const router = Router();
@@ -15,7 +15,7 @@ export default function adminRoutes(prisma) {
   // Overview: 계정별 선박 수, API 사용량
   router.get("/overview", async (req, res) => {
     try {
-      const accountNames = getAccountNames();
+      const accountNames = await getAccountNames(prisma);
 
       // 계정별 선박 수
       const vesselCounts = await prisma.vessel.groupBy({
@@ -40,8 +40,10 @@ export default function adminRoutes(prisma) {
         usageMap[key] = (usageMap[key] || 0) + (r._sum.credits || 0);
       });
 
-      // 총 사용량
-      const totalUsed = Object.values(usageMap).reduce((a, b) => a + b, 0);
+      // 총 사용량 (추적 시작 전 사용분 포함)
+      const baseline = parseInt(process.env.API_CREDITS_BASELINE || "0", 10);
+      const tracked = Object.values(usageMap).reduce((a, b) => a + b, 0);
+      const totalUsed = baseline + tracked;
 
       // 일별 사용량 (최근 30일)
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
@@ -98,7 +100,7 @@ export default function adminRoutes(prisma) {
       if (!id) return res.status(400).json({ error: "Invalid vessel ID" });
 
       const { account } = req.body;
-      const validAccounts = getAccountNames();
+      const validAccounts = await getAccountNames(prisma);
       if (!validAccounts.includes(account)) {
         return res.status(400).json({ error: `유효한 계정: ${validAccounts.join(", ")}` });
       }
@@ -110,6 +112,37 @@ export default function adminRoutes(prisma) {
       res.json(vessel);
     } catch (e) {
       if (e.code === "P2025") return res.status(404).json({ error: "Vessel not found" });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // List all accounts (for admin password management)
+  router.get("/accounts", async (req, res) => {
+    try {
+      const accounts = await prisma.account.findMany({
+        select: { id: true, name: true, role: true, createdAt: true },
+        orderBy: { name: "asc" },
+      });
+      res.json(accounts);
+    } catch (e) { res.status(500).json({ error: "Internal server error" }); }
+  });
+
+  // Change account password (admin only)
+  router.patch("/accounts/:name/password", async (req, res) => {
+    try {
+      const { name } = req.params;
+      const { newPassword } = req.body;
+      if (!newPassword || newPassword.length < 4) {
+        return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다" });
+      }
+      await prisma.account.update({
+        where: { name },
+        data: { password: newPassword },
+      });
+      clearAccountCache();
+      res.json({ success: true });
+    } catch (e) {
+      if (e.code === "P2025") return res.status(404).json({ error: "계정을 찾을 수 없습니다" });
       res.status(500).json({ error: "Internal server error" });
     }
   });
