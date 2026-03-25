@@ -123,10 +123,13 @@ const wsServer = createWsServer(httpServer, prisma);
 
 const datalasticPoller = createDatalasticPoller(prisma, (positionData) => {
   wsServer.broadcast({ type: "position", data: positionData });
+}, (vesselData) => {
+  wsServer.broadcastToAccount({ type: "vessel_updated", data: vesselData }, vesselData.account);
 });
 
 async function init() {
   app.locals.wsServer = wsServer;
+  app.locals.poller = datalasticPoller;
   startCleanupJob(prisma);
   datalasticPoller.start();
 

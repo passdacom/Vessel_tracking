@@ -68,7 +68,7 @@ export function apiCall(endpoint, params) {
   });
 }
 
-export function createDatalasticPoller(prisma, onPosition) {
+export function createDatalasticPoller(prisma, onPosition, onVesselUpdate) {
   let tasks = [];
 
   // ── 선박 제원 수집 (vessel_info, 최초 1회) ──
@@ -105,6 +105,9 @@ export function createDatalasticPoller(prisma, onPosition) {
         },
       });
       console.log(`[Datalastic] ✅ vessel_info saved for ${v.mmsi} (${d.name}) - GT:${d.gross_tonnage} DWT:${d.deadweight} Built:${d.year_built}`);
+      // 제원 업데이트를 프론트엔드에 알림
+      const updated = await prisma.vessel.findUnique({ where: { id: v.id } });
+      if (updated && onVesselUpdate) onVesselUpdate(updated);
     }
   }
 
@@ -186,6 +189,8 @@ export function createDatalasticPoller(prisma, onPosition) {
   return {
     async forceUpdate(logger, mmsiList = null) {
       if (logger) logger("▶ 시작: 수동 강제 업데이트 작업을 시작합니다...");
+      // 제원 미수집 선박이 있으면 먼저 vessel_info 수집
+      await fetchVesselInfo();
       let vessels = await prisma.vessel.findMany({ where: { active: true } });
       if (vessels.length === 0) {
         if (logger) logger("⚠ 등록된 선박이 없습니다.");

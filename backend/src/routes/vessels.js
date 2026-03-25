@@ -210,6 +210,12 @@ export default function vesselRoutes(prisma) {
 
       req.app.locals.wsServer?.broadcastToAccount({ type: "vessel_added", data: vessel }, account);
       res.status(201).json(vessel);
+
+      // 추가 직후 해당 선박만 즉시 1회 폴링 (비동기, 응답 후 실행)
+      const poller = req.app.locals.poller;
+      if (poller) {
+        poller.forceUpdate(null, [mmsi]).catch(() => {});
+      }
     } catch (e) {
       if (e.code === "P2002") return res.status(409).json({ error: "Vessel already registered" });
       res.status(500).json({ error: "Internal server error" });
