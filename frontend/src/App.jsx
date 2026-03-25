@@ -145,13 +145,16 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  // 계정별 localStorage 키 (계정마다 설정 분리)
+  const acctKey = (key) => `${key}_${accountName}`;
+
   const [sidebarWidth, setSidebarWidth] = useState(() => {
-    const stored = localStorage.getItem("vessel_sidebar_width");
+    const stored = localStorage.getItem(acctKey("vessel_sidebar_width"));
     return stored ? parseInt(stored, 10) : 288; // 18rem = 288px default
   });
   const [zoneSettings, setZoneSettings] = useState(() => {
     try {
-      const stored = localStorage.getItem("vessel_zone_settings");
+      const stored = localStorage.getItem(acctKey("vessel_zone_settings"));
       return stored ? JSON.parse(stored) : {};
     } catch { return {}; }
   });
@@ -159,7 +162,7 @@ function App() {
   // New state for custom groups
   const [customGroups, setCustomGroups] = useState(() => {
     try {
-      const stored = localStorage.getItem("vessel_custom_groups");
+      const stored = localStorage.getItem(acctKey("vessel_custom_groups"));
       return stored ? JSON.parse(stored) : [];
     } catch {
       return [];
@@ -168,13 +171,13 @@ function App() {
 
   // Persist custom groups
   useEffect(() => {
-    localStorage.setItem("vessel_custom_groups", JSON.stringify(customGroups));
-  }, [customGroups]);
+    localStorage.setItem(acctKey("vessel_custom_groups"), JSON.stringify(customGroups));
+  }, [customGroups, accountName]);
 
   // Persist zone settings
   useEffect(() => {
-    localStorage.setItem("vessel_zone_settings", JSON.stringify(zoneSettings));
-  }, [zoneSettings]);
+    localStorage.setItem(acctKey("vessel_zone_settings"), JSON.stringify(zoneSettings));
+  }, [zoneSettings, accountName]);
 
   const handleAddCustomGroup = (groupName) => {
     if (!groupName) return;
@@ -420,7 +423,7 @@ function App() {
     const onMove = (ev) => {
       const newWidth = Math.min(500, Math.max(220, startWidth + ev.clientX - startX));
       setSidebarWidth(newWidth);
-      localStorage.setItem("vessel_sidebar_width", String(newWidth));
+      localStorage.setItem(acctKey("vessel_sidebar_width"), String(newWidth));
     };
     const onUp = () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
     document.addEventListener("mousemove", onMove);
