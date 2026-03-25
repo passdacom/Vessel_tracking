@@ -8,6 +8,7 @@ import ManualPositionModal from "./components/ManualPositionModal.jsx";
 import GroupManageModal from "./components/GroupManageModal.jsx";
 import AdminDashboard from "./components/AdminDashboard.jsx";
 import SettingsModal from "./components/SettingsModal.jsx";
+import UserGuide from "./components/UserGuide.jsx";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import usePlayback from "./hooks/usePlayback.js";
 import PlaybackPanel from "./components/PlaybackPanel.jsx";
@@ -142,6 +143,7 @@ function App() {
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
   const [showZoneSettings, setShowZoneSettings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     const stored = localStorage.getItem("vessel_sidebar_width");
@@ -448,6 +450,7 @@ function App() {
             onShowShare={() => setShowSharePanel(true)}
             onLogout={handleLogout}
             onOpenSettings={() => setShowSettings(true)}
+            onOpenGuide={() => setShowGuide(true)}
             hiddenVessels={hiddenVessels}
             onToggleVessel={handleToggleVessel}
             onToggleAllVessels={handleToggleAllVessels}
@@ -536,6 +539,7 @@ function App() {
           onClose={() => setShowZoneSettings(false)}
         />
       )}
+      {showGuide && <UserGuide onClose={() => setShowGuide(false)} />}
       {showSettings && (
         <SettingsModal
           apiFetch={apiFetch}

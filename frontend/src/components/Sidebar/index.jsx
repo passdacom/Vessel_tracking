@@ -30,7 +30,7 @@ const TRACK_ALL = [
 function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel, onArchiveVessel, onRestoreVessel,
     onSelectVessel, selectedVesselId, wsConnected,
-    onShowShare, onLogout, onOpenSettings, onManageGroups,
+    onShowShare, onLogout, onOpenSettings, onOpenGuide, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     customGroups = [],
     apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched, onOpenZoneSettings,
@@ -285,6 +285,9 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                     </button>
                     <button onClick={onShowShare} className="flex-1 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
                         🔗 공유 링크
+                    </button>
+                    <button onClick={onOpenGuide} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="매뉴얼">
+                        📖
                     </button>
                     <button onClick={onOpenSettings} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="설정">
                         ⚙️
