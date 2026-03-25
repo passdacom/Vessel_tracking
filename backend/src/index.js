@@ -7,9 +7,11 @@ import { PrismaClient } from "@prisma/client";
 import vesselRoutes from "./routes/vessels.js";
 import sharesRoutes from "./routes/shares.js";
 import portRoutes from "./routes/ports.js";
+import adminRoutes from "./routes/admin.js";
 import { createWsServer } from "./services/wsServer.js";
 import { createDatalasticPoller } from "./services/datalasticPoller.js";
 import { startCleanupJob } from "./services/cleanup.js";
+import { authenticate } from "./accounts.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -40,28 +42,38 @@ const historyLimiter = rateLimit({
 });
 app.use("/api/vessels/:id/history", historyLimiter);
 
+// 인증 엔드포인트 (로그인 시 계정 정보 반환)
+app.post("/api/auth", (req, res) => {
+  const { password } = req.body;
+  const account = authenticate(password);
+  if (!account) return res.status(401).json({ error: "Invalid password" });
+  res.json({ account: account.name, role: account.role });
+});
+
 // 공유 링크 공개 조회(/api/shares/view/*)만 인증 제외, 나머지는 필수 인증
 app.use((req, res, next) => {
   if (req.path.startsWith("/api/shares/view/")) return next();
-  if (!process.env.AUTH_PASSWORD) {
-    return res.status(500).json({ error: "Server misconfiguration: AUTH_PASSWORD not set" });
-  }
+  if (req.path === "/api/auth") return next();
   const token = req.headers.authorization?.split(" ")[1];
-  if (token === process.env.AUTH_PASSWORD) return next();
-  res.status(401).json({ error: "Unauthorized" });
+  const account = token ? authenticate(token) : null;
+  if (!account) return res.status(401).json({ error: "Unauthorized" });
+  req.account = account.name;  // "kb", "kdgc", "admin"
+  req.accountRole = account.role; // "user", "admin"
+  next();
 });
 
 app.use("/api/vessels", vesselRoutes(prisma));
 app.use("/api/shares", sharesRoutes(prisma));
 app.use("/api/ports", portRoutes(prisma));
+app.use("/api/admin", adminRoutes(prisma));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// 수동 강제 업데이트 API (FORCE_UPDATE_PASSWORD 요구)
+// 수동 강제 업데이트 API (admin만 허용)
 app.post("/api/force-update", async (req, res) => {
-  const { password, mmsiList } = req.body;
-  if (!process.env.FORCE_UPDATE_PASSWORD || password !== process.env.FORCE_UPDATE_PASSWORD) {
-    return res.status(401).json({ error: "Invalid password for manual update" });
+  if (req.accountRole !== "admin") {
+    return res.status(403).json({ error: "Admin only" });
   }
+  const { mmsiList } = req.body;
 
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Transfer-Encoding', 'chunked');

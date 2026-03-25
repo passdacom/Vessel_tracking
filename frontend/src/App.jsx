@@ -6,6 +6,7 @@ import Sidebar from "./components/Sidebar/index.jsx";
 import AddVesselModal from "./components/AddVesselModal.jsx";
 import ManualPositionModal from "./components/ManualPositionModal.jsx";
 import GroupManageModal from "./components/GroupManageModal.jsx";
+import AdminDashboard from "./components/AdminDashboard.jsx";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import usePlayback from "./hooks/usePlayback.js";
 import PlaybackPanel from "./components/PlaybackPanel.jsx";
@@ -108,23 +109,33 @@ function App() {
       if (expires && Date.now() < parseInt(expires, 10)) {
         return true;
       }
-      // 만료됐으면 삭제
       localStorage.removeItem("vessel_auth");
       localStorage.removeItem("vessel_auth_expires");
+      localStorage.removeItem("vessel_account");
+      localStorage.removeItem("vessel_role");
     }
     return false;
   });
+  const [accountName, setAccountName] = useState(() => localStorage.getItem("vessel_account") || "");
+  const [accountRole, setAccountRole] = useState(() => localStorage.getItem("vessel_role") || "user");
   const [showSharePanel, setShowSharePanel] = useState(false);
 
-  const handleLogin = (pw) => {
+  const handleLogin = (pw, account, role) => {
     localStorage.setItem("vessel_auth", pw);
-    // 24 hours in milliseconds: 24 * 60 * 60 * 1000 = 86400000
     localStorage.setItem("vessel_auth_expires", (Date.now() + 86400000).toString());
+    localStorage.setItem("vessel_account", account);
+    localStorage.setItem("vessel_role", role);
+    setAccountName(account);
+    setAccountRole(role);
     setIsAuthed(true);
   };
   const handleLogout = () => {
     localStorage.removeItem("vessel_auth");
     localStorage.removeItem("vessel_auth_expires");
+    localStorage.removeItem("vessel_account");
+    localStorage.removeItem("vessel_role");
+    setAccountName("");
+    setAccountRole("user");
     setIsAuthed(false);
   };
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
@@ -387,6 +398,11 @@ function App() {
   };
 
   if (!isAuthed) return <LoginPage onLogin={handleLogin} />;
+
+  // Admin 계정이면 Admin 대시보드 표시
+  if (accountRole === "admin") {
+    return <AdminDashboard apiFetch={apiFetch} onLogout={handleLogout} />;
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">

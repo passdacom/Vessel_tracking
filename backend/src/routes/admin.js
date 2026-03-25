@@ -1,0 +1,118 @@
+import { Router } from "express";
+import { getAccountNames } from "../accounts.js";
+
+export default function adminRoutes(prisma) {
+  const router = Router();
+
+  // Admin only guard
+  router.use((req, res, next) => {
+    if (req.accountRole !== "admin") {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+    next();
+  });
+
+  // Overview: 계정별 선박 수, API 사용량
+  router.get("/overview", async (req, res) => {
+    try {
+      const accountNames = getAccountNames();
+
+      // 계정별 선박 수
+      const vesselCounts = await prisma.vessel.groupBy({
+        by: ["account"],
+        _count: true,
+      });
+      const countMap = {};
+      vesselCounts.forEach((r) => { countMap[r.account] = r._count; });
+
+      // 이번 달 API 사용량
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+      const monthlyUsage = await prisma.apiUsage.groupBy({
+        by: ["account"],
+        where: { createdAt: { gte: monthStart } },
+        _sum: { credits: true },
+      });
+      const usageMap = {};
+      monthlyUsage.forEach((r) => {
+        const key = r.account || "system";
+        usageMap[key] = (usageMap[key] || 0) + (r._sum.credits || 0);
+      });
+
+      // 총 사용량
+      const totalUsed = Object.values(usageMap).reduce((a, b) => a + b, 0);
+
+      // 일별 사용량 (최근 30일)
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000);
+      const dailyRaw = await prisma.$queryRaw`
+        SELECT DATE("createdAt") as date, SUM(credits) as total
+        FROM "ApiUsage"
+        WHERE "createdAt" >= ${thirtyDaysAgo}
+        GROUP BY DATE("createdAt")
+        ORDER BY date DESC
+        LIMIT 30
+      `;
+      const dailyUsage = dailyRaw.map((r) => ({
+        date: r.date,
+        credits: Number(r.total),
+      }));
+
+      const accounts = accountNames.map((name) => ({
+        name,
+        vesselCount: countMap[name] || 0,
+        monthlyCredits: usageMap[name] || 0,
+      }));
+
+      res.json({
+        accounts,
+        api: {
+          monthlyLimit: 20000,
+          monthlyUsed: totalUsed,
+          monthlyRemaining: Math.max(0, 20000 - totalUsed),
+          systemUsed: usageMap["system"] || 0,
+          dailyUsage,
+        },
+      });
+    } catch (e) {
+      console.error("[Admin] Overview error:", e.message);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  // All vessels with account info
+  router.get("/vessels", async (req, res) => {
+    try {
+      const vessels = await prisma.vessel.findMany({
+        include: { positions: { orderBy: { timestamp: "desc" }, take: 1 } },
+        orderBy: [{ account: "asc" }, { createdAt: "asc" }],
+      });
+      res.json(vessels);
+    } catch (e) { res.status(500).json({ error: "Internal server error" }); }
+  });
+
+  // Move vessel to different account
+  router.patch("/vessels/:id/account", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!id) return res.status(400).json({ error: "Invalid vessel ID" });
+
+      const { account } = req.body;
+      const validAccounts = getAccountNames();
+      if (!validAccounts.includes(account)) {
+        return res.status(400).json({ error: `유효한 계정: ${validAccounts.join(", ")}` });
+      }
+
+      const vessel = await prisma.vessel.update({
+        where: { id },
+        data: { account },
+      });
+      res.json(vessel);
+    } catch (e) {
+      if (e.code === "P2025") return res.status(404).json({ error: "Vessel not found" });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
+  return router;
+}

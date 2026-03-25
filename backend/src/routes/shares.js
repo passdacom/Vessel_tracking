@@ -2,13 +2,9 @@ import express from "express";
 import crypto from "crypto";
 
 function requireAdmin(req, res, next) {
-  const adminPassword = process.env.AUTH_PASSWORD;
-  if (!adminPassword) {
-    return res.status(500).json({ error: "Server misconfiguration: AUTH_PASSWORD not set" });
-  }
-  const auth = req.headers.authorization || "";
-  const password = auth.replace("Bearer ", "");
-  if (password !== adminPassword) {
+  // Auth is already handled by the global middleware (req.account is set)
+  // This just ensures the request has been authenticated
+  if (!req.account) {
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();

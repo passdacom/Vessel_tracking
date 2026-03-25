@@ -12,6 +12,7 @@ model Vessel {
   mmsi         String     @unique
   name         String?
   alias        String?
+  account      String     @default("kb")
   companyType  String     @default("자사간사")
   color        String     @default("#3b82f6")
   imo          String?
@@ -32,6 +33,8 @@ model Vessel {
   active       Boolean    @default(true)
   createdAt    DateTime   @default(now())
   positions    Position[]
+
+  @@index([account])
 }
 
 model Position {
@@ -80,6 +83,17 @@ model Port {
   lon        Float
   country    String?
   createdAt  DateTime @default(now())
+}
+
+model ApiUsage {
+  id        Int      @id @default(autoincrement())
+  endpoint  String                // e.g. "vessel", "vessel_info", "vessel_find", "vessel_hist"
+  credits   Int      @default(1)  // credits consumed
+  account   String?               // which account triggered it (null = system/poller)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([account])
 }
 
 model SharedView {

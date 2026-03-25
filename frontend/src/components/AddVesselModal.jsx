@@ -6,7 +6,7 @@ const COLORS = [
 ];
 
 export default function AddVesselModal({ onAdd, onClose, existingCount, customGroups = [], apiFetch }) {
-  const [mode, setMode] = useState('search'); // 'search' | 'manual'
+  const [mode, setMode] = useState('manual'); // 'manual' | 'search'
   const [mmsi, setMmsi] = useState('');
   const [alias, setAlias] = useState('');
   const [color, setColor] = useState(COLORS[existingCount % COLORS.length]);
@@ -20,6 +20,8 @@ export default function AddVesselModal({ onAdd, onClose, existingCount, customGr
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [selectedResult, setSelectedResult] = useState(null);
+  const [searchPassword, setSearchPassword] = useState('');
+  const [searchUnlocked, setSearchUnlocked] = useState(false);
   const searchTimerRef = useRef(null);
 
   useEffect(() => {
@@ -28,8 +30,18 @@ export default function AddVesselModal({ onAdd, onClose, existingCount, customGr
     return () => window.removeEventListener('keydown', handler);
   }, [onClose]);
 
-  // Debounced search
+  const handleUnlockSearch = () => {
+    if (searchPassword === '880715') {
+      setSearchUnlocked(true);
+      setSearchError('');
+    } else {
+      setSearchError('비밀번호가 올바르지 않습니다');
+    }
+  };
+
+  // Debounced search (only when unlocked)
   useEffect(() => {
+    if (!searchUnlocked) return;
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     setSearchError('');
 
@@ -60,7 +72,7 @@ export default function AddVesselModal({ onAdd, onClose, existingCount, customGr
     }, 500);
 
     return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-  }, [searchQuery, apiFetch]);
+  }, [searchQuery, apiFetch, searchUnlocked]);
 
   const handleSelectResult = (result) => {
     setSelectedResult(result);
@@ -102,6 +114,15 @@ export default function AddVesselModal({ onAdd, onClose, existingCount, customGr
         <div className="flex gap-1 mb-4 bg-gray-900 rounded-lg p-1">
           <button
             type="button"
+            onClick={() => { setMode('manual'); setError(''); setSelectedResult(null); }}
+            className={`flex-1 py-2 text-sm rounded-md font-medium transition ${
+              mode === 'manual' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            MMSI 직접 입력
+          </button>
+          <button
+            type="button"
             onClick={() => { setMode('search'); setError(''); }}
             className={`flex-1 py-2 text-sm rounded-md font-medium transition ${
               mode === 'search' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
@@ -109,21 +130,40 @@ export default function AddVesselModal({ onAdd, onClose, existingCount, customGr
           >
             🔍 검색으로 추가
           </button>
-          <button
-            type="button"
-            onClick={() => { setMode('manual'); setError(''); setSelectedResult(null); }}
-            className={`flex-1 py-2 text-sm rounded-md font-medium transition ${
-              mode === 'manual' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'
-            }`}
-          >
-            ✏️ MMSI 직접 입력
-          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* 검색 모드 */}
           {mode === 'search' && (
             <div className="space-y-3">
+              {/* 비밀번호 게이트 */}
+              {!searchUnlocked ? (
+                <div className="space-y-3">
+                  <p className="text-gray-400 text-sm">검색 기능을 사용하려면 비밀번호를 입력하세요.</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={searchPassword}
+                      onChange={(e) => { setSearchPassword(e.target.value); setSearchError(''); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleUnlockSearch(); } }}
+                      placeholder="비밀번호 입력"
+                      className="flex-1 px-3 py-2.5 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:outline-none"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleUnlockSearch}
+                      className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition flex-shrink-0"
+                    >
+                      확인
+                    </button>
+                  </div>
+                  {searchError && (
+                    <p className="text-red-400 text-sm">{searchError}</p>
+                  )}
+                </div>
+              ) : (
+              <>
               <div>
                 <label className="text-gray-400 text-sm block mb-1.5">
                   선박명 / IMO / MMSI 검색
@@ -189,6 +229,8 @@ export default function AddVesselModal({ onAdd, onClose, existingCount, customGr
                     {selectedResult.type && ` · ${selectedResult.type}`}
                   </div>
                 </div>
+              )}
+              </>
               )}
             </div>
           )}

@@ -80,6 +80,7 @@ export function createDatalasticPoller(prisma, onPosition) {
     for (const v of vessels) {
       const params = v.imo ? { imo: v.imo } : { mmsi: v.mmsi };
       const res = await apiCall("vessel_info", params);
+      try { await prisma.apiUsage.create({ data: { endpoint: "vessel_info", credits: 1, account: null } }); } catch {}
       if (!res?.data) continue;
       const d = res.data;
       await prisma.vessel.update({
@@ -117,6 +118,7 @@ export function createDatalasticPoller(prisma, onPosition) {
     for (const v of vessels) {
       const params = v.imo ? { imo: v.imo } : { mmsi: v.mmsi };
       const res = await apiCall("vessel", params);
+      try { await prisma.apiUsage.create({ data: { endpoint: "vessel", credits: 1, account: null } }); } catch {}
       if (!res?.data) {
         console.log(`[Datalastic] ⚠ No data for ${v.imo ? 'IMO ' + v.imo : 'MMSI ' + v.mmsi}`);
         continue;

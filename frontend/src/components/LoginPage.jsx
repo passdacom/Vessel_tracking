@@ -11,11 +11,14 @@ export default function LoginPage({ onLogin }) {
     setError('');
 
     try {
-      const res = await fetch('/api/health', {
-        headers: { Authorization: `Bearer ${password}` },
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
       });
       if (res.ok) {
-        onLogin(password);
+        const data = await res.json();
+        onLogin(password, data.account, data.role);
       } else {
         setError('잘못된 비밀번호입니다.');
       }
