@@ -275,9 +275,8 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                 </button>
             </div>
             <div className="px-3 py-3 border-t border-gray-700">
-                <button onClick={() => window.print()} className="w-full py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5">
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                    Export / Print Report
+                <button onClick={onOpenGuide} className="w-full py-2 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-200 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5">
+                    📖 사용자 매뉴얼
                 </button>
                 <div className="flex gap-1 mt-2">
                     <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} className="flex-1 py-1.5 bg-green-900 hover:bg-green-800 border border-green-700 text-green-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
@@ -286,8 +285,8 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                     <button onClick={onShowShare} className="flex-1 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
                         🔗 공유 링크
                     </button>
-                    <button onClick={onOpenGuide} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="매뉴얼">
-                        📖
+                    <button onClick={() => window.print()} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="Export / Print Report">
+                        🖨️
                     </button>
                     <button onClick={onOpenSettings} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="설정">
                         ⚙️
