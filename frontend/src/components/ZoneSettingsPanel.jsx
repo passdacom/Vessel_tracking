@@ -37,14 +37,50 @@ const ZONE_LIST = [
   { key: "JWLA 033 - Guyana (Offshore EEZ)", label: "Guyana (EEZ)", group: "americas" },
 ];
 
+// JWLA 033 HRA 국가 영토 목록 (별도 레이어)
+const COUNTRY_ZONE_LIST = [
+  // ── Europe ────────────────────────────────────────
+  { key: "JWLA 033 Country - Russia",        label: "Russia",              group: "countries-europe"   },
+  { key: "JWLA 033 Country - Ukraine",       label: "Ukraine",             group: "countries-europe"   },
+  { key: "JWLA 033 Country - Belarus",       label: "Belarus",             group: "countries-europe"   },
+  // ── Middle East ───────────────────────────────────
+  { key: "JWLA 033 Country - Saudi Arabia",  label: "Saudi Arabia",        group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Yemen",         label: "Yemen",               group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Iran",          label: "Iran",                group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Iraq",          label: "Iraq",                group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Oman",          label: "Oman",                group: "countries-mideast"  },
+  // ── East Africa ───────────────────────────────────
+  { key: "JWLA 033 Country - Libya",         label: "Libya",               group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Sudan",         label: "Sudan",               group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Eritrea",       label: "Eritrea",             group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Djibouti",      label: "Djibouti",            group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Somalia",       label: "Somalia",             group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Mozambique (N.)", label: "Mozambique (N.)",   group: "countries-africa-e" },
+  // ── West Africa ───────────────────────────────────
+  { key: "JWLA 033 Country - Nigeria",       label: "Nigeria",             group: "countries-africa-w" },
+  { key: "JWLA 033 Country - Benin",         label: "Benin",               group: "countries-africa-w" },
+  { key: "JWLA 033 Country - Togo",          label: "Togo",                group: "countries-africa-w" },
+  // ── Americas ──────────────────────────────────────
+  { key: "JWLA 033 Country - Venezuela",     label: "Venezuela",           group: "countries-americas" },
+  { key: "JWLA 033 Country - Guyana",        label: "Guyana",              group: "countries-americas" },
+];
+
 // 지역 그룹 순서 및 표시 설정
 const REGION_GROUPS = [
-  { id: "war",         label: "Middle East — JWC",         defaultOpen: true  },
-  { id: "territorial", label: "Territorial Waters (12NM)",  defaultOpen: true  },
-  { id: "europe",      label: "Europe — Black Sea / Azov",  defaultOpen: false },
-  { id: "africa-east", label: "Africa — East / Red Sea",    defaultOpen: false },
-  { id: "africa-west", label: "Africa — West / Gulf of Guinea", defaultOpen: false },
-  { id: "americas",    label: "Americas",                   defaultOpen: false },
+  { id: "war",               label: "Middle East — JWC",               defaultOpen: true  },
+  { id: "territorial",       label: "Territorial Waters (12NM)",        defaultOpen: true  },
+  { id: "europe",            label: "Europe — Black Sea / Azov",        defaultOpen: false },
+  { id: "africa-east",       label: "Africa — East / Red Sea",          defaultOpen: false },
+  { id: "africa-west",       label: "Africa — West / Gulf of Guinea",   defaultOpen: false },
+  { id: "americas",          label: "Americas",                         defaultOpen: false },
+];
+
+const COUNTRY_REGION_GROUPS = [
+  { id: "countries-europe",   label: "Europe",        defaultOpen: false },
+  { id: "countries-mideast",  label: "Middle East",   defaultOpen: false },
+  { id: "countries-africa-e", label: "East Africa",   defaultOpen: false },
+  { id: "countries-africa-w", label: "West Africa",   defaultOpen: false },
+  { id: "countries-americas", label: "Americas",      defaultOpen: false },
 ];
 
 const PRESET_COLORS = [
@@ -53,36 +89,48 @@ const PRESET_COLORS = [
 ];
 
 const DEFAULT_ZONE = { visible: true, color: "#ef4444", opacity: 0.15 };
+// 국가 레이어 기본값: 주황색, 낮은 투명도로 해역 레이어와 시각적 구분
+const COUNTRY_DEFAULT_ZONE = { visible: true, color: "#f97316", opacity: 0.10 };
 
-export { ZONE_LIST, DEFAULT_ZONE };
+export { ZONE_LIST, COUNTRY_ZONE_LIST, DEFAULT_ZONE, COUNTRY_DEFAULT_ZONE };
 
 export default function ZoneSettingsPanel({ zoneSettings, onUpdate, onClose }) {
+  const [activeTab, setActiveTab] = React.useState("sea"); // "sea" | "country"
+
   const getSetting = (key) => ({ ...DEFAULT_ZONE, ...zoneSettings[key] });
+  const getCountrySetting = (key) => ({ ...COUNTRY_DEFAULT_ZONE, ...zoneSettings[key] });
 
   const update = (key, patch) => {
     onUpdate({ ...zoneSettings, [key]: { ...getSetting(key), ...patch } });
   };
 
-  const allVisible = ZONE_LIST.every((z) => getSetting(z.key).visible);
-  const noneVisible = ZONE_LIST.every((z) => !getSetting(z.key).visible);
-
-  const toggleAll = (visible) => {
+  // ── 해역 탭 전체 제어 ──
+  const allSeaVisible = ZONE_LIST.every((z) => getSetting(z.key).visible);
+  const noneSeaVisible = ZONE_LIST.every((z) => !getSetting(z.key).visible);
+  const toggleAllSea = (visible) => {
     const next = { ...zoneSettings };
-    ZONE_LIST.forEach((z) => {
-      next[z.key] = { ...getSetting(z.key), visible };
-    });
+    ZONE_LIST.forEach((z) => { next[z.key] = { ...getSetting(z.key), visible }; });
+    onUpdate(next);
+  };
+  const seaOpacity = getSetting(ZONE_LIST[0].key).opacity;
+  const setAllSeaOpacity = (opacity) => {
+    const next = { ...zoneSettings };
+    ZONE_LIST.forEach((z) => { next[z.key] = { ...getSetting(z.key), opacity }; });
     onUpdate(next);
   };
 
-  // 전체 투명도는 첫 번째 visible 존에서 읽거나 fallback
-  const firstKey = ZONE_LIST[0].key;
-  const globalOpacity = getSetting(firstKey).opacity;
-
-  const setAllOpacity = (opacity) => {
+  // ── 국가 탭 전체 제어 ──
+  const allCountryVisible = COUNTRY_ZONE_LIST.every((z) => getCountrySetting(z.key).visible);
+  const noneCountryVisible = COUNTRY_ZONE_LIST.every((z) => !getCountrySetting(z.key).visible);
+  const toggleAllCountry = (visible) => {
     const next = { ...zoneSettings };
-    ZONE_LIST.forEach((z) => {
-      next[z.key] = { ...getSetting(z.key), opacity };
-    });
+    COUNTRY_ZONE_LIST.forEach((z) => { next[z.key] = { ...getCountrySetting(z.key), visible }; });
+    onUpdate(next);
+  };
+  const countryOpacity = getCountrySetting(COUNTRY_ZONE_LIST[0].key).opacity;
+  const setAllCountryOpacity = (opacity) => {
+    const next = { ...zoneSettings };
+    COUNTRY_ZONE_LIST.forEach((z) => { next[z.key] = { ...getCountrySetting(z.key), opacity }; });
     onUpdate(next);
   };
 
@@ -96,56 +144,121 @@ export default function ZoneSettingsPanel({ zoneSettings, onUpdate, onClose }) {
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
           <div>
             <h3 className="text-white text-sm font-semibold">War Risk Zone 설정</h3>
-            <p className="text-gray-500 text-[10px]">JWLA 033 · {ZONE_LIST.length}개 구역</p>
+            <p className="text-gray-500 text-[10px]">JWLA 033</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white text-lg px-1">✕</button>
         </div>
 
-        {/* 전체 제어 */}
-        <div className="px-4 py-2 border-b border-gray-800 flex items-center gap-2">
+        {/* 탭 전환 */}
+        <div className="flex border-b border-gray-800">
           <button
-            onClick={() => toggleAll(!allVisible)}
-            className={`px-2.5 py-1 text-xs rounded transition ${
-              allVisible ? "bg-red-700 text-white" : noneVisible ? "bg-gray-700 text-gray-400" : "bg-gray-600 text-gray-300"
+            onClick={() => setActiveTab("sea")}
+            className={`flex-1 py-2 text-xs font-medium transition ${
+              activeTab === "sea"
+                ? "text-red-400 border-b-2 border-red-500 bg-gray-800/50"
+                : "text-gray-500 hover:text-gray-300"
             }`}
           >
-            {allVisible ? "전체 숨기기" : "전체 표시"}
+            해역 구역 ({ZONE_LIST.length})
           </button>
-          <span className="text-gray-500 text-[10px] ml-1">전체 투명도</span>
-          <input
-            type="range" min="0" max="100" step="5"
-            value={Math.round(globalOpacity * 100)}
-            onChange={(e) => setAllOpacity(parseInt(e.target.value) / 100)}
-            className="flex-1 h-1 accent-red-500 cursor-pointer"
-          />
-          <span className="text-gray-500 text-[10px] w-7 text-right">
-            {Math.round(globalOpacity * 100)}%
-          </span>
+          <button
+            onClick={() => setActiveTab("country")}
+            className={`flex-1 py-2 text-xs font-medium transition ${
+              activeTab === "country"
+                ? "text-orange-400 border-b-2 border-orange-500 bg-gray-800/50"
+                : "text-gray-500 hover:text-gray-300"
+            }`}
+          >
+            국가 HRA ({COUNTRY_ZONE_LIST.length})
+          </button>
         </div>
 
-        {/* 지역별 섹션 */}
-        <div className="flex-1 overflow-y-auto px-2 py-1">
-          {REGION_GROUPS.map((group) => {
-            const zones = ZONE_LIST.filter((z) => z.group === group.id);
-            if (zones.length === 0) return null;
-            return (
-              <RegionSection
-                key={group.id}
-                group={group}
-                zones={zones}
-                zoneSettings={zoneSettings}
-                onUpdate={onUpdate}
-                getSetting={getSetting}
+        {/* ── 해역 탭 ── */}
+        {activeTab === "sea" && (
+          <>
+            <div className="px-4 py-2 border-b border-gray-800 flex items-center gap-2">
+              <button
+                onClick={() => toggleAllSea(!allSeaVisible)}
+                className={`px-2.5 py-1 text-xs rounded transition ${
+                  allSeaVisible ? "bg-red-700 text-white" : noneSeaVisible ? "bg-gray-700 text-gray-400" : "bg-gray-600 text-gray-300"
+                }`}
+              >
+                {allSeaVisible ? "전체 숨기기" : "전체 표시"}
+              </button>
+              <span className="text-gray-500 text-[10px] ml-1">전체 투명도</span>
+              <input
+                type="range" min="0" max="100" step="5"
+                value={Math.round(seaOpacity * 100)}
+                onChange={(e) => setAllSeaOpacity(parseInt(e.target.value) / 100)}
+                className="flex-1 h-1 accent-red-500 cursor-pointer"
               />
-            );
-          })}
-        </div>
+              <span className="text-gray-500 text-[10px] w-7 text-right">{Math.round(seaOpacity * 100)}%</span>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-1">
+              {REGION_GROUPS.map((group) => {
+                const zones = ZONE_LIST.filter((z) => z.group === group.id);
+                if (zones.length === 0) return null;
+                return (
+                  <RegionSection
+                    key={group.id}
+                    group={group}
+                    zones={zones}
+                    zoneSettings={zoneSettings}
+                    onUpdate={onUpdate}
+                    getSetting={getSetting}
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* ── 국가 탭 ── */}
+        {activeTab === "country" && (
+          <>
+            <div className="px-4 py-2 border-b border-gray-800 flex items-center gap-2">
+              <button
+                onClick={() => toggleAllCountry(!allCountryVisible)}
+                className={`px-2.5 py-1 text-xs rounded transition ${
+                  allCountryVisible ? "bg-orange-700 text-white" : noneCountryVisible ? "bg-gray-700 text-gray-400" : "bg-gray-600 text-gray-300"
+                }`}
+              >
+                {allCountryVisible ? "전체 숨기기" : "전체 표시"}
+              </button>
+              <span className="text-gray-500 text-[10px] ml-1">전체 투명도</span>
+              <input
+                type="range" min="0" max="100" step="5"
+                value={Math.round(countryOpacity * 100)}
+                onChange={(e) => setAllCountryOpacity(parseInt(e.target.value) / 100)}
+                className="flex-1 h-1 accent-orange-500 cursor-pointer"
+              />
+              <span className="text-gray-500 text-[10px] w-7 text-right">{Math.round(countryOpacity * 100)}%</span>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-1">
+              {COUNTRY_REGION_GROUPS.map((group) => {
+                const zones = COUNTRY_ZONE_LIST.filter((z) => z.group === group.id);
+                if (zones.length === 0) return null;
+                return (
+                  <RegionSection
+                    key={group.id}
+                    group={group}
+                    zones={zones}
+                    zoneSettings={zoneSettings}
+                    onUpdate={onUpdate}
+                    getSetting={getCountrySetting}
+                    accentColor="orange"
+                  />
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-function RegionSection({ group, zones, zoneSettings, onUpdate, getSetting }) {
+function RegionSection({ group, zones, zoneSettings, onUpdate, getSetting, accentColor = "red" }) {
   const [open, setOpen] = React.useState(group.defaultOpen);
 
   const allOn = zones.every((z) => getSetting(z.key).visible);
@@ -182,7 +295,9 @@ function RegionSection({ group, zones, zoneSettings, onUpdate, getSetting }) {
             allOff
               ? "bg-gray-700 text-gray-500"
               : allOn
-              ? "bg-red-900/60 text-red-400 hover:bg-red-800/60"
+              ? accentColor === "orange"
+                ? "bg-orange-900/60 text-orange-400 hover:bg-orange-800/60"
+                : "bg-red-900/60 text-red-400 hover:bg-red-800/60"
               : "bg-gray-700/60 text-gray-400 hover:bg-gray-600/60"
           }`}
         >
