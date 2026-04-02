@@ -65,17 +65,66 @@ function makeBlackSeaAndAzov() {
   const seaOfAzov = loadIHO("./iho_sea_of_azov.geojson", "JWLA 033 - Black Sea & Sea of Azov");
 
   console.log("  Merging Black Sea + Sea of Azov (turf.union)...");
+  let merged;
   try {
-    const merged = turf.union(turf.featureCollection([blackSea, seaOfAzov]));
-    if (merged) {
-      // simplify 제거 — 원본 IHO 정밀도 유지 (Persian Gulf와 동일 수준)
-      merged.properties = { name: "JWLA 033 - Black Sea & Sea of Azov", source: "Marine Regions IHO (merged)" };
-      return merged;
-    }
+    merged = turf.union(turf.featureCollection([blackSea, seaOfAzov]));
+    if (!merged) throw new Error("union returned null");
   } catch (e) {
     console.log("  [WARN] Union failed, using Black Sea only:", e.message);
+    merged = blackSea;
   }
-  return blackSea;
+
+  // ── JWLA 033 공식 경계 적용 ──────────────────────────────────────────
+  // 정의: "Sea of Azov and Black Sea waters enclosed by the following boundaries"
+  // 경계선: 우크라이나-루마니아 국경 → (중간 고해 지점들) → 러시아-조지아 국경
+  // 이 경계선 바깥(서쪽/남쪽)의 루마니아·불가리아·터키 해역 제외
+  //
+  // 좌표 변환 (도분 → 십진도):
+  //   a) 45°10.858'N, 29°45.929'E → (29.76548, 45.18097)
+  //      to 45°11.235'N, 29°51.140'E → (29.85233, 45.18725)
+  //   b) 45°11.474'N, 29°59.563'E → (29.99272, 45.19123)
+  //      45°5.354'N,  30°2.408'E  → (30.04013, 45.08923)
+  //   c) 44°46.625'N, 30°58.722'E → (30.97870, 44.77708)
+  //      44°44.244'N, 31°10.497'E → (31.17495, 44.73740)
+  //   d) 44°2.877'N,  31°24.602'E → (31.41003, 44.04795)
+  //      43°27.091'N, 31°19.954'E → (31.33257, 43.45152)
+  //   e) east to: 43°23.126'N, 40°0.599'E → (40.00998, 43.38543)
+  // ──────────────────────────────────────────────────────────────────────
+  console.log("  Applying JWLA 033 western boundary (excluding RO/BG/TR waters)...");
+  const exclusionPoly = turf.polygon([[
+    [29.76548, 45.18097],   // (시작) 우크라이나-루마니아 국경
+    [29.85233, 45.18725],   // (a) 45°11.235'N, 29°51.140'E
+    [29.99272, 45.19123],   // (b) 45°11.474'N, 29°59.563'E
+    [30.04013, 45.08923],   //     45°5.354'N,  30°2.408'E
+    [30.97870, 44.77708],   // (c) 44°46.625'N, 30°58.722'E
+    [31.17495, 44.73740],   //     44°44.244'N, 31°10.497'E
+    [31.41003, 44.04795],   // (d) 44°2.877'N,  31°24.602'E
+    [31.33257, 43.45152],   //     43°27.091'N, 31°19.954'E
+    [40.00998, 43.38543],   // (e) 러시아-조지아 국경 43°23.126'N, 40°0.599'E
+    // 흑해 외부로 나가서 루마니아·불가리아·터키 해역 포함하는 배제 영역 닫기
+    [40.00998, 40.00000],   // 남쪽으로 (흑해 바깥)
+    [26.50000, 40.00000],   // 서쪽으로 (터키·불가리아·루마니아 남쪽)
+    [26.50000, 47.00000],   // 북쪽으로 (루마니아 서쪽)
+    [29.76548, 45.18097],   // 닫기 (시작점으로)
+  ]]);
+
+  try {
+    const clipped = turf.difference(turf.featureCollection([merged, exclusionPoly]));
+    if (clipped) {
+      clipped.properties = {
+        name: "JWLA 033 - Black Sea & Sea of Azov",
+        source: "Marine Regions IHO + JWLA 033 boundary"
+      };
+      console.log("  ✅ JWLA 033 boundary applied successfully");
+      return clipped;
+    }
+    console.log("  [WARN] difference returned null, using merged");
+  } catch (e) {
+    console.log("  [WARN] JWLA boundary clip failed:", e.message);
+  }
+
+  merged.properties = { name: "JWLA 033 - Black Sea & Sea of Azov", source: "Marine Regions IHO (merged)" };
+  return merged;
 }
 
 // ─────────────────────────────────────────────
