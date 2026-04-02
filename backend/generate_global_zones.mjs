@@ -46,7 +46,9 @@ const GULF_OF_GUINEA = turf.feature({
 }, { name: "JWLA 033 - Gulf of Guinea", source: "JWLA 033 explicit coordinates" });
 
 // ─────────────────────────────────────────────
-// Tier B: IHO 데이터 (Black Sea, Sea of Azov)
+// Tier B: IHO 데이터 (Black Sea + Sea of Azov)
+// JWLA 033: "Black Sea and Sea of Azov (all waters plus inland waters)"
+// → 두 IHO 데이터를 union하여 단일 구역으로 생성
 // Marine Regions WFS에서 다운로드한 고정밀 데이터 사용
 // ─────────────────────────────────────────────
 function loadIHO(filename, label) {
@@ -54,6 +56,27 @@ function loadIHO(filename, label) {
   const feat = raw.features[0];
   feat.properties = { name: label, source: "Marine Regions IHO" };
   return feat;
+}
+
+function makeBlackSeaAndAzov() {
+  console.log("  Loading Black Sea IHO data...");
+  const blackSea = loadIHO("./iho_black_sea.geojson", "JWLA 033 - Black Sea & Sea of Azov");
+  console.log("  Loading Sea of Azov IHO data...");
+  const seaOfAzov = loadIHO("./iho_sea_of_azov.geojson", "JWLA 033 - Black Sea & Sea of Azov");
+
+  console.log("  Merging Black Sea + Sea of Azov (turf.union)...");
+  try {
+    const merged = turf.union(turf.featureCollection([blackSea, seaOfAzov]));
+    if (merged) {
+      // 렌더링 성능을 위해 약간 단순화 (시각적 차이 없음)
+      const simplified = turf.simplify(merged, { tolerance: 0.003, highQuality: true });
+      simplified.properties = { name: "JWLA 033 - Black Sea & Sea of Azov", source: "Marine Regions IHO (merged)" };
+      return simplified;
+    }
+  } catch (e) {
+    console.log("  [WARN] Union failed, using Black Sea only:", e.message);
+  }
+  return blackSea;
 }
 
 // ─────────────────────────────────────────────
@@ -131,41 +154,61 @@ async function make12NMZone(countriesData, countryName, label, clipBbox) {
 // ─────────────────────────────────────────────
 // Tier D: EEZ 근사 폴리곤 (Venezuela, Guyana)
 // JWLA 033: 영해 외측 EEZ 해상 시설
+//
+// Venezuela EEZ 경계 (UNCLOS/해도 기준):
+//  - 북쪽: 네덜란드령 앤틸리스 (Aruba/Curaçao/Bonaire) 남측 ~12°N
+//  - 서쪽: 콜롬비아 해상 경계 ~73.4°W
+//  - 동쪽: 트리니다드 근방 ~61°W
+//  - 남쪽: 베네수엘라 해안선
+//
+// Guyana Offshore EEZ (Stabroek Block):
+//  - 7°N~10°N, 57.5°W~60.5°W
 // ─────────────────────────────────────────────
 const VENEZUELA_EEZ = turf.feature({
   type: "Polygon",
   coordinates: [[
-    [-73.38,  11.80],  // NW (Colombia border area)
-    [-72.40,  12.20],
-    [-70.00,  13.00],
-    [-67.50,  13.20],
-    [-65.00,  13.50],
-    [-63.00,  13.00],
-    [-61.00,  12.00],
-    [-60.50,  10.80],
-    [-61.00,  10.00],  // SE (Trinidad area)
-    [-62.00,   9.50],
-    [-63.00,   8.80],
-    [-64.50,   8.50],
-    [-67.00,   8.50],
-    [-70.00,   8.80],
-    [-72.00,  10.00],
-    [-73.38,  11.80],
+    [-73.40,  12.00],  // NW: 콜롬비아/베네수엘라 해상 경계
+    [-73.10,  12.30],  // offshore NW
+    [-71.80,  12.40],  // Aruba 남측 (Aruba: 70.0°W, 12.5°N)
+    [-70.20,  12.45],  // Curaçao 남측 (Curaçao: 69.0°W, 12.2°N)
+    [-68.80,  12.30],  // Bonaire 남측 (Bonaire: 68.2°W, 12.2°N)
+    [-67.00,  12.10],  // offshore central
+    [-65.30,  12.00],  // offshore NE
+    [-64.00,  12.10],  // near Isla Margarita (63.9°W, 11°N)
+    [-62.80,  11.80],  // offshore NE
+    [-61.50,  11.20],  // 트리니다드 북서쪽
+    [-61.00,  10.80],  // Gulf of Paria 근방
+    [-61.10,  10.00],  // SE 해안선
+    [-61.60,   9.50],  // 오리노코 삼각주 근방
+    [-62.20,   9.10],  // 해안선 동쪽
+    [-63.20,   8.80],  // 해안선
+    [-64.50,   8.55],  // 해안선
+    [-66.00,   8.70],  // 해안선
+    [-67.50,   9.00],  // 해안선 서쪽
+    [-69.20,   9.60],  // 해안선
+    [-70.80,  10.30],  // 마라카이보 근방
+    [-71.80,  10.90],  // 해안선 NW
+    [-72.80,  11.50],  // 해안선 NW
+    [-73.40,  12.00],  // 시작점 복귀
   ]]
 }, { name: "JWLA 033 - Venezuela (Offshore EEZ)", source: "UNCLOS EEZ approximation" });
 
+// Guyana Offshore EEZ: Stabroek Block (7°N~10°N, 57.5°W~60.5°W)
+// 레퍼런스 이미지 기준 - 수리남 영역(-56°W) 미포함
 const GUYANA_EEZ = turf.feature({
   type: "Polygon",
   coordinates: [[
-    [-59.50,   8.50],  // NW
-    [-57.50,   9.00],
-    [-56.00,   8.80],
-    [-56.00,   7.50],
-    [-57.00,   6.50],
-    [-58.00,   6.00],
-    [-59.50,   6.50],
-    [-59.80,   7.50],
-    [-59.50,   8.50],
+    [-60.20,   9.20],  // NW
+    [-59.50,   9.80],  // N
+    [-58.50,   9.70],  // NE
+    [-57.80,   9.20],  // E
+    [-57.60,   8.20],  // SE
+    [-57.80,   7.30],  // S
+    [-58.50,   6.80],  // SW
+    [-59.50,   7.00],  // W
+    [-60.20,   7.80],  // W
+    [-60.50,   8.50],  // NW
+    [-60.20,   9.20],  // 시작점 복귀
   ]]
 }, { name: "JWLA 033 - Guyana (Offshore EEZ)", source: "UNCLOS EEZ approximation" });
 
@@ -196,19 +239,13 @@ async function makeGuyanaOffshoreEEZ(countriesData) {
 async function main() {
   const results = [];
 
-  // ── Tier B: Black Sea & Sea of Azov ──────────
-  console.log("\n▶ Tier B: IHO Sea Bodies");
+  // ── Tier B: Black Sea & Sea of Azov (단일 구역) ──
+  console.log("\n▶ Tier B: Black Sea & Sea of Azov (merged, JWLA 033 single zone)");
   try {
-    const blackSea = loadIHO("./iho_black_sea.geojson", "JWLA 033 - Black Sea");
-    results.push(blackSea);
-    console.log("  ✅ Black Sea");
-  } catch (e) { console.log("  [ERROR] Black Sea:", e.message); }
-
-  try {
-    const seaOfAzov = loadIHO("./iho_sea_of_azov.geojson", "JWLA 033 - Sea of Azov");
-    results.push(seaOfAzov);
-    console.log("  ✅ Sea of Azov");
-  } catch (e) { console.log("  [ERROR] Sea of Azov:", e.message); }
+    const blackSeaAzov = makeBlackSeaAndAzov();
+    results.push(blackSeaAzov);
+    console.log("  ✅ Black Sea & Sea of Azov (merged)");
+  } catch (e) { console.log("  [ERROR] Black Sea & Sea of Azov:", e.message); }
 
   // ── Tier A: Gulf of Guinea ────────────────────
   console.log("\n▶ Tier A: Gulf of Guinea (JWLA 033 explicit coordinates)");

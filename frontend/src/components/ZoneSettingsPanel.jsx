@@ -15,9 +15,8 @@ const ZONE_LIST = [
   { key: "Israel 12NM Territorial Waters", label: "Israel 12NM", group: "territorial" },
   { key: "Lebanon 12NM Territorial Waters", label: "Lebanon 12NM", group: "territorial" },
 
-  // ── Europe — Black Sea (신규) ───────────────────────
-  { key: "JWLA 033 - Black Sea", label: "Black Sea", group: "europe" },
-  { key: "JWLA 033 - Sea of Azov", label: "Sea of Azov", group: "europe" },
+  // ── Europe — Black Sea (신규, JWLA 033 단일 구역) ──
+  { key: "JWLA 033 - Black Sea & Sea of Azov", label: "Black Sea & Sea of Azov", group: "europe" },
 
   // ── East Africa / Red Sea (신규) ───────────────────
   { key: "JWLA 033 - Libya (Coastal 12NM)", label: "Libya (12NM)", group: "africa-east" },
@@ -42,7 +41,7 @@ const ZONE_LIST = [
 const REGION_GROUPS = [
   { id: "war",         label: "Middle East — JWC",         defaultOpen: true  },
   { id: "territorial", label: "Territorial Waters (12NM)",  defaultOpen: true  },
-  { id: "europe",      label: "Europe — Black Sea",         defaultOpen: false },
+  { id: "europe",      label: "Europe — Black Sea / Azov",  defaultOpen: false },
   { id: "africa-east", label: "Africa — East / Red Sea",    defaultOpen: false },
   { id: "africa-west", label: "Africa — West / Gulf of Guinea", defaultOpen: false },
   { id: "americas",    label: "Americas",                   defaultOpen: false },
