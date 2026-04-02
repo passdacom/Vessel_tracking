@@ -9,9 +9,11 @@ import { DEFAULT_ZONE } from "../ZoneSettingsPanel.jsx";
 export default function RestrictedZone({ zoneSettings = {} }) {
   const [geoData, setGeoData] = useState(null);
   const [territorialData, setTerritorialData] = useState(null);
+  const [globalData, setGlobalData] = useState(null);
 
   const geoRef = useRef(null);
   const territorialRef = useRef(null);
+  const globalRef = useRef(null);
 
   useEffect(() => {
     fetch("/war-risk-zone.geojson")
@@ -23,6 +25,11 @@ export default function RestrictedZone({ zoneSettings = {} }) {
       .then((r) => r.json())
       .then(setTerritorialData)
       .catch((e) => console.error("12NM boundary load error:", e));
+
+    fetch("/war-risk-zone-global.geojson")
+      .then((r) => r.json())
+      .then(setGlobalData)
+      .catch((e) => console.error("Global war risk zone load error:", e));
   }, []);
 
   const getSetting = useCallback((name) => {
@@ -51,6 +58,7 @@ export default function RestrictedZone({ zoneSettings = {} }) {
   useEffect(() => {
     if (geoRef.current) geoRef.current.setStyle(getStyle);
     if (territorialRef.current) territorialRef.current.setStyle(getStyle);
+    if (globalRef.current) globalRef.current.setStyle(getStyle);
   }, [zoneSettings, getStyle]);
 
   // 모든 zone이 숨겨져 있으면 렌더링 스킵
@@ -73,6 +81,14 @@ export default function RestrictedZone({ zoneSettings = {} }) {
           ref={territorialRef}
           key={`12nm-${territorialData.features?.length || 0}`}
           data={territorialData}
+          style={getStyle}
+        />
+      )}
+      {globalData && (
+        <GeoJSON
+          ref={globalRef}
+          key={`global-${globalData.features?.length || 0}`}
+          data={globalData}
           style={getStyle}
         />
       )}
