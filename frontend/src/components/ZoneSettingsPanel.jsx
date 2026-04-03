@@ -39,30 +39,37 @@ const ZONE_LIST = [
 
 // JWLA 033 HRA 국가 영토 목록 (별도 레이어)
 const COUNTRY_ZONE_LIST = [
-  // ── Europe ────────────────────────────────────────
-  { key: "JWLA 033 Country - Russia",        label: "Russia",              group: "countries-europe"   },
-  { key: "JWLA 033 Country - Ukraine",       label: "Ukraine",             group: "countries-europe"   },
-  { key: "JWLA 033 Country - Belarus",       label: "Belarus",             group: "countries-europe"   },
+  // ── Russia ────────────────────────────────────────
+  { key: "JWLA 033 Country - Russia",               label: "Russia",              group: "countries-russia"   },
   // ── Middle East ───────────────────────────────────
-  { key: "JWLA 033 Country - Saudi Arabia",  label: "Saudi Arabia",        group: "countries-mideast"  },
-  { key: "JWLA 033 Country - Yemen",         label: "Yemen",               group: "countries-mideast"  },
-  { key: "JWLA 033 Country - Iran",          label: "Iran",                group: "countries-mideast"  },
-  { key: "JWLA 033 Country - Iraq",          label: "Iraq",                group: "countries-mideast"  },
-  { key: "JWLA 033 Country - Oman",          label: "Oman",                group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Bahrain",              label: "Bahrain",             group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Iran",                 label: "Iran",                group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Iraq",                 label: "Iraq",                group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Israel",               label: "Israel",              group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Kuwait",               label: "Kuwait",              group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Lebanon",              label: "Lebanon",             group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Oman",                 label: "Oman",                group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Qatar",                label: "Qatar",               group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Saudi Arabia",         label: "Saudi Arabia",        group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Syria",                label: "Syria",               group: "countries-mideast"  },
+  { key: "JWLA 033 Country - United Arab Emirates", label: "UAE",                 group: "countries-mideast"  },
+  { key: "JWLA 033 Country - Yemen",                label: "Yemen",               group: "countries-mideast"  },
+  // ── Asia ──────────────────────────────────────────
+  { key: "JWLA 033 Country - Pakistan",             label: "Pakistan",            group: "countries-asia"     },
   // ── East Africa ───────────────────────────────────
-  { key: "JWLA 033 Country - Libya",         label: "Libya",               group: "countries-africa-e" },
-  { key: "JWLA 033 Country - Sudan",         label: "Sudan",               group: "countries-africa-e" },
-  { key: "JWLA 033 Country - Eritrea",       label: "Eritrea",             group: "countries-africa-e" },
-  { key: "JWLA 033 Country - Djibouti",      label: "Djibouti",            group: "countries-africa-e" },
-  { key: "JWLA 033 Country - Somalia",       label: "Somalia",             group: "countries-africa-e" },
-  { key: "JWLA 033 Country - Mozambique (N.)", label: "Mozambique (N.)",   group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Djibouti",             label: "Djibouti",            group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Eritrea",              label: "Eritrea",             group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Libya",                label: "Libya",               group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Mozambique (N.)",      label: "Mozambique (N.)",     group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Somalia",              label: "Somalia",             group: "countries-africa-e" },
+  { key: "JWLA 033 Country - Sudan",                label: "Sudan",               group: "countries-africa-e" },
   // ── West Africa ───────────────────────────────────
-  { key: "JWLA 033 Country - Nigeria",       label: "Nigeria",             group: "countries-africa-w" },
-  { key: "JWLA 033 Country - Benin",         label: "Benin",               group: "countries-africa-w" },
-  { key: "JWLA 033 Country - Togo",          label: "Togo",                group: "countries-africa-w" },
-  // ── Americas ──────────────────────────────────────
-  { key: "JWLA 033 Country - Venezuela",     label: "Venezuela",           group: "countries-americas" },
-  { key: "JWLA 033 Country - Guyana",        label: "Guyana",              group: "countries-americas" },
+  { key: "JWLA 033 Country - Benin",                label: "Benin",               group: "countries-africa-w" },
+  { key: "JWLA 033 Country - Nigeria",              label: "Nigeria",             group: "countries-africa-w" },
+  { key: "JWLA 033 Country - Togo",                 label: "Togo",                group: "countries-africa-w" },
+  // ── South America ─────────────────────────────────
+  { key: "JWLA 033 Country - Guyana",               label: "Guyana",              group: "countries-americas" },
+  { key: "JWLA 033 Country - Venezuela",            label: "Venezuela",           group: "countries-americas" },
 ];
 
 // 지역 그룹 순서 및 표시 설정
@@ -76,11 +83,12 @@ const REGION_GROUPS = [
 ];
 
 const COUNTRY_REGION_GROUPS = [
-  { id: "countries-europe",   label: "Europe",        defaultOpen: false },
+  { id: "countries-russia",   label: "Russia",        defaultOpen: false },
   { id: "countries-mideast",  label: "Middle East",   defaultOpen: false },
+  { id: "countries-asia",     label: "Asia",          defaultOpen: false },
   { id: "countries-africa-e", label: "East Africa",   defaultOpen: false },
   { id: "countries-africa-w", label: "West Africa",   defaultOpen: false },
-  { id: "countries-americas", label: "Americas",      defaultOpen: false },
+  { id: "countries-americas", label: "South America", defaultOpen: false },
 ];
 
 const PRESET_COLORS = [
@@ -89,8 +97,8 @@ const PRESET_COLORS = [
 ];
 
 const DEFAULT_ZONE = { visible: true, color: "#ef4444", opacity: 0.15 };
-// 국가 레이어 기본값: 주황색, 낮은 투명도로 해역 레이어와 시각적 구분
-const COUNTRY_DEFAULT_ZONE = { visible: true, color: "#f97316", opacity: 0.10 };
+// 국가 레이어 기본값: 주황색, 낮은 투명도 — 기본 숨김
+const COUNTRY_DEFAULT_ZONE = { visible: false, color: "#f97316", opacity: 0.10 };
 
 export { ZONE_LIST, COUNTRY_ZONE_LIST, DEFAULT_ZONE, COUNTRY_DEFAULT_ZONE };
 

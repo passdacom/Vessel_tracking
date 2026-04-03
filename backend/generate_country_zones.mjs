@@ -11,39 +11,47 @@ import { readFileSync, writeFileSync } from "fs";
 import * as turf from "@turf/turf";
 
 // ─────────────────────────────────────────────
-// JWLA 033 HRA 국가 목록
+// JWLA 033 HRA 국가 목록 (사진 기준 전체)
 // ─────────────────────────────────────────────
 const HRA_COUNTRIES = [
-  // ── Europe — Black Sea / Ukraine Conflict ─
-  { name: "Russia",       label: "JWLA 033 Country - Russia",        group: "countries-europe",   simplify: 0.05 },
-  { name: "Ukraine",      label: "JWLA 033 Country - Ukraine",       group: "countries-europe",   simplify: null },
-  { name: "Belarus",      label: "JWLA 033 Country - Belarus",       group: "countries-europe",   simplify: null },
+  // ── Russia ───────────────────────────────
+  { name: "Russia",               label: "JWLA 033 Country - Russia",               group: "countries-russia",   simplify: 0.05 },
 
   // ── Middle East ───────────────────────────
-  { name: "Saudi Arabia", label: "JWLA 033 Country - Saudi Arabia",  group: "countries-mideast",  simplify: null },
-  { name: "Yemen",        label: "JWLA 033 Country - Yemen",         group: "countries-mideast",  simplify: null },
-  { name: "Iran",         label: "JWLA 033 Country - Iran",          group: "countries-mideast",  simplify: null },
-  { name: "Iraq",         label: "JWLA 033 Country - Iraq",          group: "countries-mideast",  simplify: null },
-  { name: "Oman",         label: "JWLA 033 Country - Oman",          group: "countries-mideast",  simplify: null },
+  { name: "Bahrain",              label: "JWLA 033 Country - Bahrain",              group: "countries-mideast",  simplify: null },
+  { name: "Iran",                 label: "JWLA 033 Country - Iran",                 group: "countries-mideast",  simplify: null },
+  { name: "Iraq",                 label: "JWLA 033 Country - Iraq",                 group: "countries-mideast",  simplify: null },
+  { name: "Israel",               label: "JWLA 033 Country - Israel",               group: "countries-mideast",  simplify: null },
+  { name: "Kuwait",               label: "JWLA 033 Country - Kuwait",               group: "countries-mideast",  simplify: null },
+  { name: "Lebanon",              label: "JWLA 033 Country - Lebanon",              group: "countries-mideast",  simplify: null },
+  { name: "Oman",                 label: "JWLA 033 Country - Oman",                 group: "countries-mideast",  simplify: null },
+  { name: "Qatar",                label: "JWLA 033 Country - Qatar",                group: "countries-mideast",  simplify: null },
+  { name: "Saudi Arabia",         label: "JWLA 033 Country - Saudi Arabia",         group: "countries-mideast",  simplify: null },
+  { name: "Syria",                label: "JWLA 033 Country - Syria",                group: "countries-mideast",  simplify: null },
+  { name: "United Arab Emirates", label: "JWLA 033 Country - United Arab Emirates", group: "countries-mideast",  simplify: null },
+  { name: "Yemen",                label: "JWLA 033 Country - Yemen",                group: "countries-mideast",  simplify: null },
 
-  // ── East Africa / Red Sea ─────────────────
-  { name: "Libya",        label: "JWLA 033 Country - Libya",         group: "countries-africa-e", simplify: null },
-  { name: "Sudan",        label: "JWLA 033 Country - Sudan",         group: "countries-africa-e", simplify: null },
-  { name: "Eritrea",      label: "JWLA 033 Country - Eritrea",       group: "countries-africa-e", simplify: null },
-  { name: "Djibouti",     label: "JWLA 033 Country - Djibouti",      group: "countries-africa-e", simplify: null },
-  { name: "Somalia",      label: "JWLA 033 Country - Somalia",       group: "countries-africa-e", simplify: null },
-  { name: "Mozambique",   label: "JWLA 033 Country - Mozambique (N.)", group: "countries-africa-e", simplify: null,
-    // Cabo Delgado는 모잠비크 북부 — 위도 -17°S 이북만 표시
+  // ── Asia ─────────────────────────────────
+  { name: "Pakistan",             label: "JWLA 033 Country - Pakistan",             group: "countries-asia",     simplify: null },
+
+  // ── Africa — East / Red Sea ───────────────
+  { name: "Djibouti",             label: "JWLA 033 Country - Djibouti",             group: "countries-africa-e", simplify: null },
+  { name: "Eritrea",              label: "JWLA 033 Country - Eritrea",              group: "countries-africa-e", simplify: null },
+  { name: "Libya",                label: "JWLA 033 Country - Libya",                group: "countries-africa-e", simplify: null },
+  { name: "Mozambique",           label: "JWLA 033 Country - Mozambique (N.)",      group: "countries-africa-e", simplify: null,
+    // Cabo Delgado는 모잠비크 북부 — -17°S 이북만
     clipBbox: [30.0, -17.0, 41.0, -10.0] },
+  { name: "Somalia",              label: "JWLA 033 Country - Somalia",              group: "countries-africa-e", simplify: null },
+  { name: "Sudan",                label: "JWLA 033 Country - Sudan",                group: "countries-africa-e", simplify: null },
 
-  // ── West Africa / Gulf of Guinea ──────────
-  { name: "Nigeria",      label: "JWLA 033 Country - Nigeria",       group: "countries-africa-w", simplify: null },
-  { name: "Benin",        label: "JWLA 033 Country - Benin",         group: "countries-africa-w", simplify: null },
-  { name: "Togo",         label: "JWLA 033 Country - Togo",          group: "countries-africa-w", simplify: null },
+  // ── Africa — West / Gulf of Guinea ────────
+  { name: "Benin",                label: "JWLA 033 Country - Benin",                group: "countries-africa-w", simplify: null },
+  { name: "Nigeria",              label: "JWLA 033 Country - Nigeria",              group: "countries-africa-w", simplify: null },
+  { name: "Togo",                 label: "JWLA 033 Country - Togo",                 group: "countries-africa-w", simplify: null },
 
-  // ── Americas ─────────────────────────────
-  { name: "Venezuela",    label: "JWLA 033 Country - Venezuela",     group: "countries-americas", simplify: null },
-  { name: "Guyana",       label: "JWLA 033 Country - Guyana",        group: "countries-americas", simplify: null },
+  // ── South America ─────────────────────────
+  { name: "Guyana",               label: "JWLA 033 Country - Guyana",               group: "countries-americas", simplify: null },
+  { name: "Venezuela",            label: "JWLA 033 Country - Venezuela",            group: "countries-americas", simplify: null },
 ];
 
 // ─────────────────────────────────────────────
