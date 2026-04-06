@@ -21,7 +21,50 @@ function lastSeenText(timestamp) {
   return `${Math.floor(hours / 24)}일 전`;
 }
 
-export default function AdminDashboard({ apiFetch, onLogout }) {
+// ─── API 사용량 예측 계산 ───────────────────────────────────────────────────
+function calcApiPrediction(overview) {
+  if (!overview) return null;
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  const totalDays = new Date(year, month + 1, 0).getDate(); // 이번 달 총 일수
+  const daysElapsed = now.getDate();                         // 오늘까지 경과 일수
+  const daysRemaining = totalDays - daysElapsed;             // 남은 일수
+
+  // 이번 달 실제 일별 데이터만 추출 (최근순)
+  const thisMonthDays = (overview.api.dailyUsage || []).filter((d) => {
+    const dd = new Date(d.date);
+    return dd.getFullYear() === year && dd.getMonth() === month;
+  });
+
+  // 최근 7일 평균 (없으면 월 누적/경과일로 추정)
+  let dailyAvg;
+  if (thisMonthDays.length > 0) {
+    const recent = thisMonthDays.slice(0, Math.min(7, thisMonthDays.length));
+    dailyAvg = recent.reduce((s, d) => s + d.credits, 0) / recent.length;
+  } else {
+    dailyAvg = daysElapsed > 0 ? overview.api.monthlyUsed / daysElapsed : 0;
+  }
+
+  const predictedAdditional = Math.round(dailyAvg * daysRemaining);
+  const predictedTotal = overview.api.monthlyUsed + predictedAdditional;
+  const limit = overview.api.monthlyLimit;
+  const ratio = predictedTotal / limit;
+
+  return {
+    totalDays,
+    daysElapsed,
+    daysRemaining,
+    dailyAvg: Math.round(dailyAvg),
+    predictedTotal,
+    predictedRemaining: Math.max(0, limit - predictedTotal),
+    ratio,
+    riskLevel: ratio > 1 ? "danger" : ratio > 0.85 ? "warning" : "safe",
+  };
+}
+
+export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
   const [overview, setOverview] = useState(null);
   const [vessels, setVessels] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -115,6 +158,8 @@ export default function AdminDashboard({ apiFetch, onLogout }) {
 
   const accountNames = overview?.accounts?.map((a) => a.name) || [];
 
+  const prediction = calcApiPrediction(overview);
+
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       {/* 헤더 */}
@@ -127,12 +172,21 @@ export default function AdminDashboard({ apiFetch, onLogout }) {
               <p className="text-xs text-gray-500">관리자 대시보드</p>
             </div>
           </div>
-          <button
-            onClick={onLogout}
-            className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-sm rounded-lg transition"
-          >
-            로그아웃
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onSwitchToMap}
+              className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-sm rounded-lg transition flex items-center gap-1.5"
+              title="지도 뷰로 전환"
+            >
+              🗺 지도 보기
+            </button>
+            <button
+              onClick={onLogout}
+              className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-sm rounded-lg transition"
+            >
+              로그아웃
+            </button>
+          </div>
         </div>
       </div>
 
@@ -170,6 +224,94 @@ export default function AdminDashboard({ apiFetch, onLogout }) {
               <div className="text-2xl font-bold text-white">{vessels.length}</div>
               <div className="text-xs text-gray-500 mt-1">
                 활성: {vessels.filter((v) => v.active !== false).length} / 보관: {vessels.filter((v) => v.active === false).length}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* API 사용량 예측 카드 */}
+        {prediction && (
+          <div className={`border rounded-xl p-4 ${
+            prediction.riskLevel === "danger"
+              ? "bg-red-950/40 border-red-800"
+              : prediction.riskLevel === "warning"
+              ? "bg-yellow-950/40 border-yellow-800"
+              : "bg-gray-900 border-gray-800"
+          }`}>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-300">월말 API 사용량 예측</h2>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                prediction.riskLevel === "danger"
+                  ? "bg-red-900 text-red-300"
+                  : prediction.riskLevel === "warning"
+                  ? "bg-yellow-900 text-yellow-300"
+                  : "bg-green-900 text-green-300"
+              }`}>
+                {prediction.riskLevel === "danger" ? "⚠ 한도 초과 예상" : prediction.riskLevel === "warning" ? "⚠ 주의" : "✓ 안전"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+              <div>
+                <div className="text-[10px] text-gray-500 mb-0.5">예측 월말 사용량</div>
+                <div className={`text-xl font-bold ${
+                  prediction.riskLevel === "danger" ? "text-red-400" : prediction.riskLevel === "warning" ? "text-yellow-400" : "text-blue-400"
+                }`}>
+                  {prediction.predictedTotal.toLocaleString()}
+                </div>
+                <div className="text-[10px] text-gray-600">/ {overview.api.monthlyLimit.toLocaleString()} 한도</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-gray-500 mb-0.5">예측 잔여 크레딧</div>
+                <div className={`text-xl font-bold ${prediction.predictedRemaining === 0 ? "text-red-400" : "text-gray-300"}`}>
+                  {prediction.predictedRemaining > 0 ? prediction.predictedRemaining.toLocaleString() : "부족"}
+                </div>
+                <div className="text-[10px] text-gray-600">예측 기준</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-gray-500 mb-0.5">일평균 사용량</div>
+                <div className="text-xl font-bold text-gray-300">{prediction.dailyAvg.toLocaleString()}</div>
+                <div className="text-[10px] text-gray-600">최근 7일 평균</div>
+              </div>
+              <div>
+                <div className="text-[10px] text-gray-500 mb-0.5">경과 / 남은 일수</div>
+                <div className="text-xl font-bold text-gray-300">
+                  {prediction.daysElapsed}<span className="text-gray-600 text-sm">일</span>
+                  {" / "}
+                  {prediction.daysRemaining}<span className="text-gray-600 text-sm">일</span>
+                </div>
+                <div className="text-[10px] text-gray-600">총 {prediction.totalDays}일</div>
+              </div>
+            </div>
+
+            {/* 예측 프로그레스 바 */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] text-gray-500">
+                <span>현재 사용 ({overview.api.monthlyUsed.toLocaleString()})</span>
+                <span>예측 추가 (+{(prediction.predictedTotal - overview.api.monthlyUsed).toLocaleString()})</span>
+                <span>한도 {overview.api.monthlyLimit.toLocaleString()}</span>
+              </div>
+              <div className="h-3 bg-gray-800 rounded-full overflow-hidden flex">
+                {/* 현재 사용 */}
+                <div
+                  className="h-full bg-blue-600 transition-all"
+                  style={{ width: `${Math.min(100, (overview.api.monthlyUsed / overview.api.monthlyLimit) * 100)}%` }}
+                />
+                {/* 예측 추가분 */}
+                <div
+                  className={`h-full transition-all opacity-60 ${
+                    prediction.riskLevel === "danger" ? "bg-red-500" : prediction.riskLevel === "warning" ? "bg-yellow-500" : "bg-blue-400"
+                  }`}
+                  style={{
+                    width: `${Math.min(
+                      100 - Math.min(100, (overview.api.monthlyUsed / overview.api.monthlyLimit) * 100),
+                      ((prediction.predictedTotal - overview.api.monthlyUsed) / overview.api.monthlyLimit) * 100
+                    )}%`
+                  }}
+                />
+              </div>
+              <div className="text-[10px] text-gray-600 text-right">
+                예측 사용률 {Math.round(prediction.ratio * 100)}%
               </div>
             </div>
           </div>

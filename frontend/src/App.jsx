@@ -120,6 +120,7 @@ function App() {
   });
   const [accountName, setAccountName] = useState(() => localStorage.getItem("vessel_account") || "");
   const [accountRole, setAccountRole] = useState(() => localStorage.getItem("vessel_role") || "user");
+  const [adminView, setAdminView] = useState("dashboard"); // admin: "dashboard" | "map"
   const [showSharePanel, setShowSharePanel] = useState(false);
 
   const handleLogin = (pw, account, role) => {
@@ -411,9 +412,15 @@ function App() {
 
   if (!isAuthed) return <LoginPage onLogin={handleLogin} />;
 
-  // Admin 계정이면 Admin 대시보드 표시
-  if (accountRole === "admin") {
-    return <AdminDashboard apiFetch={apiFetch} onLogout={handleLogout} />;
+  // Admin 계정 — 기본은 대시보드, 지도 전환 가능
+  if (accountRole === "admin" && adminView === "dashboard") {
+    return (
+      <AdminDashboard
+        apiFetch={apiFetch}
+        onLogout={handleLogout}
+        onSwitchToMap={() => setAdminView("map")}
+      />
+    );
   }
 
   const handleSidebarResize = (e) => {
@@ -485,6 +492,15 @@ function App() {
         >
           {sidebarVisible ? "◀" : "▶"}
         </button>
+        {/* Admin 지도 모드: 대시보드 복귀 버튼 */}
+        {accountRole === "admin" && (
+          <button
+            onClick={() => setAdminView("dashboard")}
+            className="absolute top-3 right-3 z-[900] bg-blue-700 hover:bg-blue-600 text-white text-xs px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-1.5 transition print:hidden"
+          >
+            ⬛ 대시보드
+          </button>
+        )}
         <Map
           vessels={vessels.filter(v => v.active !== false && !hiddenVessels.has(v.id))}
           positions={positions}
