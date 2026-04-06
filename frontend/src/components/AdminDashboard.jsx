@@ -71,8 +71,15 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [actionMsg, setActionMsg] = useState("");
   const [accounts, setAccounts] = useState([]);
-  const [showPwChange, setShowPwChange] = useState(null); // account name
+  const [showPwChange, setShowPwChange] = useState(null);
   const [newPw, setNewPw] = useState("");
+
+  // ── 데이터 강제 수신 상태 ──
+  const [fetchVesselId, setFetchVesselId] = useState("");
+  const [fetchDays, setFetchDays] = useState(7);
+  const [fetchLoading, setFetchLoading] = useState(false);
+  const [fetchResult, setFetchResult] = useState(null); // { fetched, stored, credits_used, error }
+  const [fetchLog, setFetchLog] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -534,6 +541,141 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
             </div>
           </div>
         )}
+
+        {/* ── 데이터 강제 수신 ── */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-300">선박 데이터 강제 수신</h2>
+              <p className="text-[10px] text-gray-600 mt-0.5">
+                Datalastic vessel_hist API 호출 — 1일당 1크레딧 소모
+              </p>
+            </div>
+            {fetchResult && (
+              <button
+                onClick={() => { setFetchResult(null); setFetchLog(""); }}
+                className="text-[10px] text-gray-600 hover:text-gray-400"
+              >
+                결과 닫기
+              </button>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            {/* 선박 선택 */}
+            <div className="sm:col-span-2">
+              <label className="text-[10px] text-gray-500 block mb-1">대상 선박</label>
+              <select
+                value={fetchVesselId}
+                onChange={(e) => { setFetchVesselId(e.target.value); setFetchResult(null); }}
+                className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600"
+              >
+                <option value="">— 선박 선택 —</option>
+                {vessels
+                  .filter((v) => v.active !== false)
+                  .map((v) => (
+                    <option key={v.id} value={v.id}>
+                      [{v.account}] {v.alias || v.name || v.mmsi} ({v.mmsi})
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {/* 기간 선택 */}
+            <div>
+              <label className="text-[10px] text-gray-500 block mb-1">
+                수신 기간 — <span className="text-yellow-400 font-mono">{fetchDays}일</span>
+                <span className="text-gray-600"> ({fetchDays} 크레딧)</span>
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range" min="1" max="30" step="1"
+                  value={fetchDays}
+                  onChange={(e) => setFetchDays(parseInt(e.target.value))}
+                  className="flex-1 h-1 accent-blue-500 cursor-pointer"
+                />
+                <input
+                  type="number" min="1" max="30"
+                  value={fetchDays}
+                  onChange={(e) => setFetchDays(Math.min(30, Math.max(1, parseInt(e.target.value) || 1)))}
+                  className="w-12 bg-gray-800 border border-gray-700 text-white text-xs rounded px-2 py-1 text-center"
+                />
+              </div>
+              <p className="text-[10px] text-gray-600 mt-1">현재 시점 기준 최근 {fetchDays}일</p>
+            </div>
+          </div>
+
+          {/* 실행 버튼 */}
+          <button
+            onClick={async () => {
+              if (!fetchVesselId) return;
+              setFetchLoading(true);
+              setFetchResult(null);
+              setFetchLog(`📡 ${fetchDays}일치 위치 데이터 수신 중...`);
+              try {
+                const res = await apiFetch(`/vessels/${fetchVesselId}/history`, {
+                  method: "POST",
+                  body: JSON.stringify({ days: fetchDays }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                  setFetchResult({ ...data, success: true });
+                  setFetchLog(`✅ 완료: ${data.fetched}건 수신, ${data.stored}건 저장 (${data.credits_used} 크레딧 소모)`);
+                  fetchData(); // API 사용량 카드 갱신
+                } else {
+                  setFetchResult({ error: data.error || "알 수 없는 오류", success: false });
+                  setFetchLog(`❌ 오류: ${data.error || "API 호출 실패"}`);
+                }
+              } catch (e) {
+                setFetchResult({ error: e.message, success: false });
+                setFetchLog(`❌ 네트워크 오류: ${e.message}`);
+              }
+              setFetchLoading(false);
+            }}
+            disabled={!fetchVesselId || fetchLoading}
+            className={`w-full py-2 text-sm font-medium rounded-lg transition flex items-center justify-center gap-2 ${
+              !fetchVesselId || fetchLoading
+                ? "bg-gray-800 text-gray-600 cursor-not-allowed"
+                : "bg-blue-700 hover:bg-blue-600 text-white"
+            }`}
+          >
+            {fetchLoading ? (
+              <><span className="animate-pulse">⏳</span> 수신 중...</>
+            ) : (
+              <><span>📥</span> 데이터 강제 수신 ({fetchDays} 크레딧)</>
+            )}
+          </button>
+
+          {/* 결과 표시 */}
+          {fetchLog && (
+            <div className={`mt-3 rounded-lg px-3 py-2 text-xs font-mono ${
+              fetchResult?.success
+                ? "bg-green-950 border border-green-800 text-green-300"
+                : fetchResult?.error
+                ? "bg-red-950 border border-red-800 text-red-300"
+                : "bg-gray-800 border border-gray-700 text-gray-400"
+            }`}>
+              {fetchLog}
+              {fetchResult?.success && (
+                <div className="mt-1.5 grid grid-cols-3 gap-2 pt-1.5 border-t border-green-900">
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-green-400">{fetchResult.fetched}</div>
+                    <div className="text-[10px] text-gray-500">API 수신</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-blue-400">{fetchResult.stored}</div>
+                    <div className="text-[10px] text-gray-500">신규 저장</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg font-bold text-yellow-400">{fetchResult.credits_used}</div>
+                    <div className="text-[10px] text-gray-500">크레딧 소모</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
     </div>
   );
