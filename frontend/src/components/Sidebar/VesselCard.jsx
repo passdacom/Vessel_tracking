@@ -184,10 +184,19 @@ export default function VesselCard({
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: vessel.color }} />
 
                 {/* 선박명 + 숨기기 버튼 */}
-                <div className="flex-1 flex items-center min-w-0 pr-1">
-                    <span className="text-white font-semibold text-sm truncate tracking-tight mr-1">
+                <div className="flex-1 flex items-center min-w-0 pr-1 gap-1">
+                    <span className="text-white font-semibold text-sm truncate tracking-tight">
                         {displayName}
                     </span>
+                    {/* HRA 배지: 현재 전쟁위험구역 내 위치 */}
+                    {latestPosition?.currentZones?.length > 0 && (
+                        <span
+                            className="flex-shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-red-700 text-red-100 border border-red-500 leading-none"
+                            title={`HRA 구역: ${latestPosition.currentZones.join(', ')}`}
+                        >
+                            HRA
+                        </span>
+                    )}
                     <button
                         onClick={(e) => { e.stopPropagation(); if (onToggleVisible) onToggleVisible(); }}
                         className={`p-0.5 rounded transition flex-shrink-0 ${isVisible ? 'text-blue-400 hover:text-blue-300' : 'text-gray-500 hover:text-gray-400'}`}

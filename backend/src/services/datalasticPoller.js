@@ -1,5 +1,6 @@
 import https from "https";
 import cron from "node-cron";
+import { geofenceChecker } from "./geofenceChecker.js";
 
 const API_BASE = "https://api.datalastic.com/api/v0";
 
@@ -68,7 +69,7 @@ export function apiCall(endpoint, params) {
   });
 }
 
-export function createDatalasticPoller(prisma, onPosition, onVesselUpdate) {
+export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZoneEvent) {
   let tasks = [];
 
   // ── 선박 제원 수집 (vessel_info, 최초 1회) ──
@@ -175,12 +176,21 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate) {
       });
 
       if (!suspicious) {
+        // ── Geofence 검사 ──────────────────────────────────────────
+        const zoneEvents = await geofenceChecker.detectAndSave(prisma, v, position).catch(() => []);
+        if (zoneEvents.length > 0 && onZoneEvent) {
+          for (const ev of zoneEvents) onZoneEvent({ ...ev, vesselName: d.name || v.alias || v.name || v.mmsi, account: v.account });
+        }
+        const currentZones = geofenceChecker.getCurrentZones(v.id);
+        // ────────────────────────────────────────────────────────────
+
         console.log(`[Datalastic] ✅ ${v.mmsi} (${d.name || v.alias}) | ${lat.toFixed(4)},${lon.toFixed(4)} | SOG:${sog} | Dest:${destination} | ETA:${d.eta_UTC || "-"}`);
         onPosition({
           vesselId: v.id,
           mmsi: v.mmsi,
           name: d.name || v.name || v.alias,
           ...position,
+          currentZones,
         });
       }
     }
@@ -277,11 +287,20 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate) {
         updatedCount++;
 
         if (!susp) {
+          // ── Geofence 검사 ──────────────────────────────────────────
+          const zoneEvents = await geofenceChecker.detectAndSave(prisma, v, position).catch(() => []);
+          if (zoneEvents.length > 0 && onZoneEvent) {
+            for (const ev of zoneEvents) onZoneEvent({ ...ev, vesselName: d.name || v.alias || v.name || v.mmsi, account: v.account });
+          }
+          const currentZones = geofenceChecker.getCurrentZones(v.id);
+          // ────────────────────────────────────────────────────────────
+
           onPosition({
             vesselId: v.id,
             mmsi: v.mmsi,
             name: d.name || v.name || v.alias,
             ...position,
+            currentZones,
           });
         }
       }

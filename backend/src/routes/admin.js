@@ -127,6 +127,40 @@ export default function adminRoutes(prisma) {
     } catch (e) { res.status(500).json({ error: "Internal server error" }); }
   });
 
+  // Zone Events 조회 (진입/이탈 이력)
+  router.get("/zone-events", async (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit || "100", 10), 500);
+      const offset = parseInt(req.query.offset || "0", 10);
+      const eventType = req.query.eventType; // "entry" | "exit" | undefined
+      const vesselId = req.query.vesselId ? parseInt(req.query.vesselId, 10) : undefined;
+      const since = req.query.since ? new Date(req.query.since) : undefined;
+
+      const where = {};
+      if (eventType) where.eventType = eventType;
+      if (vesselId) where.vesselId = vesselId;
+      if (since) where.createdAt = { gte: since };
+
+      const [events, total] = await Promise.all([
+        prisma.zoneEvent.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip: offset,
+          take: limit,
+          include: {
+            vessel: { select: { mmsi: true, name: true, alias: true, account: true } },
+          },
+        }),
+        prisma.zoneEvent.count({ where }),
+      ]);
+
+      res.json({ events, total, limit, offset });
+    } catch (e) {
+      console.error("[Admin] zone-events error:", e.message);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+
   // Change account password (admin only)
   router.patch("/accounts/:name/password", async (req, res) => {
     try {

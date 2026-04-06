@@ -81,6 +81,12 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
   const [fetchResult, setFetchResult] = useState(null); // { fetched, stored, credits_used, error }
   const [fetchLog, setFetchLog] = useState("");
 
+  // ── Zone Events 상태 ──
+  const [zoneEvents, setZoneEvents] = useState([]);
+  const [zoneEventsLoading, setZoneEventsLoading] = useState(false);
+  const [zoneEventsFilter, setZoneEventsFilter] = useState(""); // "" | "entry" | "exit"
+  const [zoneEventsTotal, setZoneEventsTotal] = useState(0);
+
   const fetchData = useCallback(async () => {
     try {
       const [ovRes, vsRes, acRes] = await Promise.all([
@@ -97,7 +103,24 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
     setLoading(false);
   }, [apiFetch]);
 
+  const fetchZoneEvents = useCallback(async (filter = "") => {
+    setZoneEventsLoading(true);
+    try {
+      const qs = filter ? `?eventType=${filter}&limit=50` : "?limit=50";
+      const res = await apiFetch(`/admin/zone-events${qs}`);
+      if (res.ok) {
+        const data = await res.json();
+        setZoneEvents(data.events || []);
+        setZoneEventsTotal(data.total || 0);
+      }
+    } catch (e) {
+      console.error("Zone events fetch error:", e);
+    }
+    setZoneEventsLoading(false);
+  }, [apiFetch]);
+
   useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchZoneEvents(zoneEventsFilter); }, [fetchZoneEvents, zoneEventsFilter]);
 
   const handleMoveVessel = async (vesselId, targetAccount) => {
     const res = await apiFetch(`/admin/vessels/${vesselId}/account`, {
@@ -672,6 +695,100 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* ── Zone Events 로그 ── */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-800 flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-300">HRA 구역 진입/이탈 이력</h2>
+              <p className="text-[10px] text-gray-600 mt-0.5">전체 {zoneEventsTotal}건</p>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* 필터 버튼 */}
+              {["", "entry", "exit"].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setZoneEventsFilter(f)}
+                  className={`text-xs px-2.5 py-1 rounded-lg border transition ${
+                    zoneEventsFilter === f
+                      ? f === "entry"
+                        ? "bg-red-800 border-red-600 text-red-200"
+                        : f === "exit"
+                        ? "bg-green-800 border-green-600 text-green-200"
+                        : "bg-blue-800 border-blue-600 text-blue-200"
+                      : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600"
+                  }`}
+                >
+                  {f === "" ? "전체" : f === "entry" ? "🔴 진입" : "🟢 이탈"}
+                </button>
+              ))}
+              <button
+                onClick={() => fetchZoneEvents(zoneEventsFilter)}
+                disabled={zoneEventsLoading}
+                className="text-xs px-2 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg text-gray-400 transition"
+                title="새로고침"
+              >
+                {zoneEventsLoading ? "⏳" : "↻"}
+              </button>
+            </div>
+          </div>
+
+          {zoneEventsLoading ? (
+            <div className="px-4 py-6 text-center text-gray-600 text-sm">로딩 중...</div>
+          ) : zoneEvents.length === 0 ? (
+            <div className="px-4 py-8 text-center text-gray-600 text-sm">
+              {zoneEventsFilter === "entry" ? "진입 이력 없음" : zoneEventsFilter === "exit" ? "이탈 이력 없음" : "구역 진입/이탈 이력 없음"}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-xs text-gray-500 border-b border-gray-800">
+                    <th className="text-left px-4 py-2">구분</th>
+                    <th className="text-left px-4 py-2">선박</th>
+                    <th className="text-left px-4 py-2">구역</th>
+                    <th className="text-left px-4 py-2">위치</th>
+                    <th className="text-left px-4 py-2">위치시간</th>
+                    <th className="text-left px-4 py-2">감지시간</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {zoneEvents.map((ev) => (
+                    <tr key={ev.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                      <td className="px-4 py-2">
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                          ev.eventType === "entry"
+                            ? "bg-red-900/60 text-red-300"
+                            : "bg-green-900/60 text-green-300"
+                        }`}>
+                          {ev.eventType === "entry" ? "진입" : "이탈"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <div className="text-sm font-medium text-white truncate max-w-[120px]">
+                          {ev.vessel?.alias || ev.vessel?.name || ev.vessel?.mmsi}
+                        </div>
+                        <div className="text-[10px] text-gray-500">{ev.vessel?.account}</div>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-gray-300 max-w-[180px]">
+                        <span className="truncate block" title={ev.zoneName}>{ev.zoneName}</span>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-gray-500 font-mono">
+                        {ev.lat?.toFixed(3)}, {ev.lon?.toFixed(3)}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-gray-500">
+                        {formatDate(ev.posTimestamp)}
+                      </td>
+                      <td className="px-4 py-2 text-xs text-gray-500">
+                        {formatDate(ev.createdAt)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

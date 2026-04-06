@@ -64,9 +64,33 @@ function ReportTable({ vessels, positions }) {
   );
 }
 
+// ── Zone Event Toast ──────────────────────────────────────────────────────────
+function ZoneToast({ toasts, onDismiss }) {
+  if (toasts.length === 0) return null;
+  return (
+    <div className="fixed bottom-4 right-4 z-[2000] flex flex-col gap-2 pointer-events-none print:hidden" style={{ maxWidth: "340px" }}>
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className="pointer-events-auto flex items-start gap-2 rounded-lg shadow-xl px-3 py-2.5 text-sm text-white animate-fade-in"
+          style={{ background: t.eventType === "entry" ? "#b91c1c" : "#15803d" }}
+        >
+          <span className="text-base mt-0.5">{t.eventType === "entry" ? "🔴" : "🟢"}</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold truncate">{t.vesselName}</div>
+            <div className="text-xs opacity-90 truncate">{t.eventType === "entry" ? "진입" : "이탈"}: {t.zoneName}</div>
+          </div>
+          <button onClick={() => onDismiss(t.id)} className="opacity-70 hover:opacity-100 ml-1 text-xs">✕</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function App() {
   const [vessels, setVessels] = useState([]);
   const [positions, setPositions] = useState({});
+  const [zoneToasts, setZoneToasts] = useState([]);
   const [trackHours, setTrackHours] = useState(24);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
@@ -300,6 +324,10 @@ function App() {
   const wsToken = localStorage.getItem("vessel_auth") || "";
   const wsUrl = `${proto}//${wsHost}/ws?token=${encodeURIComponent(wsToken)}`;
 
+  const dismissToast = useCallback((id) => {
+    setZoneToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
   useWebSocket(wsUrl, (msg) => {
     if (msg.type === "position") {
       const { vesselId } = msg.data;
@@ -307,6 +335,12 @@ function App() {
         ...prev,
         [vesselId]: [msg.data, ...(prev[vesselId] || [])].slice(0, 2000),
       }));
+    } else if (msg.type === "zone_event") {
+      const ev = msg.data;
+      const toastId = `${ev.vesselId}-${ev.zoneName}-${ev.eventType}-${Date.now()}`;
+      setZoneToasts((prev) => [...prev.slice(-4), { id: toastId, ...ev }]);
+      // 8초 후 자동 제거
+      setTimeout(() => setZoneToasts((prev) => prev.filter((t) => t.id !== toastId)), 8000);
     } else if (msg.type === "vessel_added") {
       const newVessel = msg.data;
       setVessels((prev) => prev.find((v) => v.id === newVessel.id) ? prev : [...prev, newVessel]);
@@ -567,6 +601,7 @@ function App() {
           onLogout={handleLogout}
         />
       )}
+      <ZoneToast toasts={zoneToasts} onDismiss={dismissToast} />
     </div>
   );
 }

@@ -12,6 +12,7 @@ import { createWsServer } from "./services/wsServer.js";
 import { createDatalasticPoller } from "./services/datalasticPoller.js";
 import { startCleanupJob } from "./services/cleanup.js";
 import { authenticate, clearAccountCache } from "./accounts.js";
+import { geofenceChecker } from "./services/geofenceChecker.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -125,12 +126,21 @@ const datalasticPoller = createDatalasticPoller(prisma, (positionData) => {
   wsServer.broadcast({ type: "position", data: positionData });
 }, (vesselData) => {
   wsServer.broadcastToAccount({ type: "vessel_updated", data: vesselData }, vesselData.account);
+}, (zoneEventData) => {
+  // zone_event를 해당 계정(+admin)에게 브로드캐스트
+  wsServer.broadcastToAccount({ type: "zone_event", data: zoneEventData }, zoneEventData.account || "");
+  // admin은 broadcastToAccount에서 항상 포함되므로 별도 broadcast 불필요
 });
 
 async function init() {
   app.locals.wsServer = wsServer;
   app.locals.poller = datalasticPoller;
   startCleanupJob(prisma);
+
+  // Geofence 초기화 (zone 파일 로드 → 선박 상태 초기화)
+  geofenceChecker.loadZones();
+  await geofenceChecker.initState(prisma);
+
   datalasticPoller.start();
 
   // Seed accounts from ACCOUNTS env var if DB is empty
