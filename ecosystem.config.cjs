@@ -30,9 +30,9 @@ module.exports = {
       name: "vessel-frontend",
       cwd: "./frontend",
       script: "node_modules/.bin/vite",
-      args: "preview --host 0.0.0.0 --port 5173",
+      args: "--host 0.0.0.0 --port 5173",
       env: {
-        NODE_ENV: "production",
+        NODE_ENV: "development",
       },
       restart_delay: 3000,
       max_restarts: 10,
