@@ -86,6 +86,9 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
         });
     };
 
+    // VesselCard 드롭다운용 전체 그룹 목록 (기본값 제외, 동적 포함)
+    const allCustomGroups = Array.from(allGroupNames).filter(g => g !== '자사간사' && g !== '타사간사');
+
     const renderVesselList = (list) => list.map((vessel) => (
         <VesselCard key={vessel.id} vessel={vessel}
             latestPosition={positions[vessel.id]?.[0]}
@@ -96,7 +99,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
             isVisible={!hiddenVessels.has(vessel.id)}
             onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)}
-            customGroups={customGroups}
+            customGroups={allCustomGroups}
             apiFetch={apiFetch}
             onStartPlayback={onStartPlayback}
             onHistoryFetched={onHistoryFetched} />
@@ -345,6 +348,8 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
         };
     });
 
+    const allCustomGroups = Array.from(allGroupNames).filter(g => g !== '자사간사' && g !== '타사간사');
+
     const renderVesselList = (list) => list.map((vessel) => (
         <VesselCard key={vessel.id} vessel={vessel}
             latestPosition={positions[vessel.id]?.[0]}
@@ -355,7 +360,7 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
             isVisible={!hiddenVessels.has(vessel.id)}
             onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)}
-            customGroups={customGroups}
+            customGroups={allCustomGroups}
             apiFetch={apiFetch}
             onStartPlayback={onStartPlayback}
             onHistoryFetched={onHistoryFetched} />

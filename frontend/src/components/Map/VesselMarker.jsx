@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Marker, Popup } from 'react-leaflet';
 import L from 'leaflet';
 
@@ -76,6 +76,31 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
         () => createShipIcon(vessel.color, rotation, isSelected, isStale),
         [vessel.color, rotation, isSelected, isStale]
     );
+
+    const [fuPw, setFuPw] = useState('');
+    const [fuLoading, setFuLoading] = useState(false);
+    const [fuResult, setFuResult] = useState(null); // null | 'ok' | 'err' | 'auth'
+
+    const handleForceUpdate = async (e) => {
+        e.stopPropagation();
+        if (!fuPw || fuLoading) return;
+        setFuLoading(true);
+        setFuResult(null);
+        try {
+            const res = await fetch('/api/force-update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${fuPw}`,
+                },
+                body: JSON.stringify({ mmsiList: [vessel.mmsi] }),
+            });
+            if (res.status === 403) { setFuResult('auth'); }
+            else if (res.ok) { setFuResult('ok'); }
+            else { setFuResult('err'); }
+        } catch { setFuResult('err'); }
+        setFuLoading(false);
+    };
 
     const displayName = vessel.alias || vessel.name || vessel.mmsi;
     const vesselType = vessel.typeSpecific || vessel.vesselType;
@@ -187,6 +212,60 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
                             </tr>
                         </tbody>
                     </table>
+
+                    {/* 강제 갱신 */}
+                    <div style={{ borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 7 }}>
+                        {fuResult === 'ok' ? (
+                            <div style={{ fontSize: 11, color: '#16a34a', textAlign: 'center', padding: '3px 0' }}>
+                                ✓ 갱신 요청 완료
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                                <input
+                                    type="password"
+                                    value={fuPw}
+                                    onChange={(e) => { setFuPw(e.target.value); setFuResult(null); }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleForceUpdate(e); }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    placeholder="비밀번호"
+                                    style={{
+                                        flex: 1,
+                                        fontSize: 11,
+                                        padding: '4px 7px',
+                                        border: fuResult === 'auth' ? '1px solid #f87171' : '1px solid #d1d5db',
+                                        borderRadius: 5,
+                                        outline: 'none',
+                                        color: '#374151',
+                                        background: '#f9fafb',
+                                        minWidth: 0,
+                                    }}
+                                />
+                                <button
+                                    onClick={handleForceUpdate}
+                                    disabled={fuLoading || !fuPw}
+                                    style={{
+                                        fontSize: 11,
+                                        padding: '4px 9px',
+                                        borderRadius: 5,
+                                        border: '1px solid #d1d5db',
+                                        background: fuLoading || !fuPw ? '#f3f4f6' : '#f1f5f9',
+                                        color: fuLoading || !fuPw ? '#9ca3af' : '#374151',
+                                        cursor: fuLoading || !fuPw ? 'default' : 'pointer',
+                                        whiteSpace: 'nowrap',
+                                        flexShrink: 0,
+                                    }}
+                                >
+                                    {fuLoading ? '…' : '강제 갱신'}
+                                </button>
+                            </div>
+                        )}
+                        {fuResult === 'auth' && (
+                            <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3 }}>비밀번호가 올바르지 않습니다</div>
+                        )}
+                        {fuResult === 'err' && (
+                            <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3 }}>요청 실패. 다시 시도해주세요</div>
+                        )}
+                    </div>
                 </div>
             </Popup>
         </Marker>

@@ -562,7 +562,7 @@ function App() {
       </div>
 
       {showAddModal && (
-        <AddVesselModal onAdd={handleAddVessel} onClose={() => setShowAddModal(false)} existingCount={vessels.length} customGroups={customGroups} apiFetch={apiFetch} />
+        <AddVesselModal onAdd={handleAddVessel} onClose={() => setShowAddModal(false)} existingCount={vessels.length} customGroups={[...new Set([...customGroups, ...vessels.map(v => v.companyType).filter(Boolean)])].filter(g => g !== '자사간사' && g !== '타사간사')} apiFetch={apiFetch} />
       )}
       {showSharePanel && (
         <SharePanel
