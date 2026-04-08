@@ -309,8 +309,8 @@ function App() {
   useEffect(() => {
     if (!isAuthed) return;
     apiFetch("/vessels")
-      .then((r) => r.json())
-      .then((data) => { setVessels(data); loadPositions(data); })
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => { const list = Array.isArray(data) ? data : []; setVessels(list); loadPositions(list); })
       .catch(() => { });
   }, [isAuthed, apiFetch]); // eslint-disable-line
 
