@@ -39,10 +39,27 @@ async function waitForDb() {
   console.error(`[wait-for-db] ❌ ${MAX_WAIT_MS / 1000}초 내 DB에 연결하지 못했습니다. 서버를 강제 시작합니다.`);
 }
 
-waitForDb().then(() => {
-  const child = spawn("node", ["src/index.js"], {
-    stdio: "inherit",
-    env: process.env,
+async function runPrismaGenerate() {
+  return new Promise((resolve) => {
+    console.log("[wait-for-db] 🔧 prisma generate 실행 중...");
+    const gen = spawn("npx", ["prisma", "generate"], {
+      stdio: "inherit",
+      env: process.env,
+    });
+    gen.on("exit", (code) => {
+      if (code === 0) console.log("[wait-for-db] ✅ prisma generate 완료");
+      else console.warn(`[wait-for-db] ⚠ prisma generate 종료 코드: ${code}`);
+      resolve(); // 실패해도 서버 시작은 진행
+    });
   });
-  child.on("exit", (code) => process.exit(code ?? 0));
-});
+}
+
+waitForDb()
+  .then(runPrismaGenerate)
+  .then(() => {
+    const child = spawn("node", ["src/index.js"], {
+      stdio: "inherit",
+      env: process.env,
+    });
+    child.on("exit", (code) => process.exit(code ?? 0));
+  });
