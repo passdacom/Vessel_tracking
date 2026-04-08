@@ -79,12 +79,17 @@ app.use(async (req, res, next) => {
   if (req.path.startsWith("/api/shares/view/")) return next();
   if (req.path === "/api/auth") return next();
   if (req.path === "/api/account/change-password") return next();
-  const token = req.headers.authorization?.split(" ")[1];
-  const account = token ? await authenticate(prisma, token) : null;
-  if (!account) return res.status(401).json({ error: "Unauthorized" });
-  req.account = account.name;
-  req.accountRole = account.role;
-  next();
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    const account = token ? await authenticate(prisma, token) : null;
+    if (!account) return res.status(401).json({ error: "Unauthorized" });
+    req.account = account.name;
+    req.accountRole = account.role;
+    next();
+  } catch (e) {
+    console.error("[auth middleware] error:", e.message);
+    res.status(500).json({ error: "Authentication error" });
+  }
 });
 
 app.use("/api/vessels", vesselRoutes(prisma));

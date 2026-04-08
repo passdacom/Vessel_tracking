@@ -117,7 +117,7 @@ export default function vesselRoutes(prisma) {
         orderBy: { createdAt: "asc" },
       });
       res.json(vessels);
-    } catch (e) { res.status(500).json({ error: "Internal server error" }); }
+    } catch (e) { console.error("[/api/vessels] findMany error:", e.message); res.status(500).json({ error: "Internal server error" }); }
   });
 
   // Get position history
