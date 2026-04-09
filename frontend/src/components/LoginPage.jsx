@@ -18,7 +18,8 @@ export default function LoginPage({ onLogin }) {
       });
       if (res.ok) {
         const data = await res.json();
-        onLogin(password, data.account, data.role);
+        // data.token: 서버 발급 세션 토큰 (없으면 구 방식 폴백)
+        onLogin(password, data.account, data.role, data.token);
       } else {
         setError('잘못된 비밀번호입니다.');
       }

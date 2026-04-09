@@ -303,6 +303,15 @@ export default function vesselRoutes(prisma) {
         })
         .sort((a, b) => (a.last_position_epoch || a.timestamp_epoch || 0) - (b.last_position_epoch || b.timestamp_epoch || 0));
 
+      // 히스토리 저장 직전 가장 오래된 레코드보다 이전 위치 1회만 조회 (N+1 제거)
+      const firstEpoch = sorted.length > 0 ? (sorted[0].last_position_epoch || sorted[0].timestamp_epoch) : null;
+      const firstTs = firstEpoch ? new Date(firstEpoch * 1000) : null;
+      let prevPos = firstTs ? await prisma.position.findFirst({
+        where: { vesselId: id, suspicious: false, timestamp: { lt: firstTs } },
+        orderBy: { timestamp: "desc" },
+        select: { lat: true, lon: true, timestamp: true },
+      }) : null;
+
       for (const r of sorted) {
         const lat = parseFloat(r.lat);
         const lon = parseFloat(r.lon);
@@ -310,11 +319,6 @@ export default function vesselRoutes(prisma) {
         const timestamp = epoch ? new Date(epoch * 1000) : null;
         if (!timestamp || isNaN(timestamp.getTime())) continue;
 
-        const prevPos = await prisma.position.findFirst({
-          where: { vesselId: id, suspicious: false, timestamp: { lt: timestamp } },
-          orderBy: { timestamp: "desc" },
-          select: { lat: true, lon: true, timestamp: true },
-        });
         const { suspicious, impliedSpeed, reason } = checkSpoofing(prevPos, lat, lon, timestamp);
 
         try {
@@ -333,10 +337,12 @@ export default function vesselRoutes(prisma) {
             update: {},
           });
           stored++;
+          // 다음 레코드 스푸핑 탐지를 위해 메모리에서 prevPos 갱신 (DB 재조회 없음)
+          if (!suspicious) prevPos = { lat, lon, timestamp };
         } catch { /* skip duplicates */ }
       }
 
-      console.log(`[History] ${vessel.name || vessel.mmsi}: ${records.length} fetched, ${stored} stored, ${days} credits (${req.account})`);
+      logger.info(`[History] ${vessel.name || vessel.mmsi}: ${records.length} fetched, ${stored} stored, ${days} credits (${req.account})`);
       res.json({ fetched: records.length, stored, credits_used: days });
     } catch (e) {
       console.error("[History] Error:", e.message);

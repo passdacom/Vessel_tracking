@@ -129,17 +129,22 @@ function App() {
 
   const [wsConnected, setWsConnected] = useState(false);
   const [isAuthed, setIsAuthed] = useState(() => {
-    const auth = localStorage.getItem("vessel_auth");
-    if (auth) {
-      const expires = localStorage.getItem("vessel_auth_expires");
-      if (expires && Date.now() < parseInt(expires, 10)) {
-        return true;
-      }
-      localStorage.removeItem("vessel_auth");
-      localStorage.removeItem("vessel_auth_expires");
-      localStorage.removeItem("vessel_account");
-      localStorage.removeItem("vessel_role");
+    // ① 세션 토큰 확인 (새 방식)
+    const token = localStorage.getItem("vessel_token");
+    const tokenExp = localStorage.getItem("vessel_token_expires");
+    if (token && tokenExp && Date.now() < parseInt(tokenExp, 10)) return true;
+    if (token) {
+      localStorage.removeItem("vessel_token");
+      localStorage.removeItem("vessel_token_expires");
     }
+    // ② 비밀번호 폴백 (구 방식 — 기존 로그인 유지용)
+    const auth = localStorage.getItem("vessel_auth");
+    const authExp = localStorage.getItem("vessel_auth_expires");
+    if (auth && authExp && Date.now() < parseInt(authExp, 10)) return true;
+    localStorage.removeItem("vessel_auth");
+    localStorage.removeItem("vessel_auth_expires");
+    localStorage.removeItem("vessel_account");
+    localStorage.removeItem("vessel_role");
     return false;
   });
   const [accountName, setAccountName] = useState(() => localStorage.getItem("vessel_account") || "");
@@ -147,9 +152,19 @@ function App() {
   const [adminView, setAdminView] = useState("dashboard"); // admin: "dashboard" | "map"
   const [showSharePanel, setShowSharePanel] = useState(false);
 
-  const handleLogin = (pw, account, role) => {
-    localStorage.setItem("vessel_auth", pw);
-    localStorage.setItem("vessel_auth_expires", (Date.now() + 86400000).toString());
+  const handleLogin = (pw, account, role, token) => {
+    if (token) {
+      // 새 방식: 서버 발급 세션 토큰 저장
+      localStorage.setItem("vessel_token", token);
+      localStorage.setItem("vessel_token_expires", (Date.now() + 86400000).toString());
+      // 구 비밀번호 스토리지 제거
+      localStorage.removeItem("vessel_auth");
+      localStorage.removeItem("vessel_auth_expires");
+    } else {
+      // 폴백: 구 방식 유지 (서버가 토큰을 내려주지 않는 경우)
+      localStorage.setItem("vessel_auth", pw);
+      localStorage.setItem("vessel_auth_expires", (Date.now() + 86400000).toString());
+    }
     localStorage.setItem("vessel_account", account);
     localStorage.setItem("vessel_role", role);
     setAccountName(account);
@@ -157,6 +172,8 @@ function App() {
     setIsAuthed(true);
   };
   const handleLogout = () => {
+    localStorage.removeItem("vessel_token");
+    localStorage.removeItem("vessel_token_expires");
     localStorage.removeItem("vessel_auth");
     localStorage.removeItem("vessel_auth_expires");
     localStorage.removeItem("vessel_account");
@@ -274,12 +291,13 @@ function App() {
 
   const apiFetch = useCallback(
     (path, options = {}) => {
-      const password = localStorage.getItem("vessel_auth") || "";
+      // 세션 토큰 우선, 없으면 구 비밀번호 폴백
+      const authToken = localStorage.getItem("vessel_token") || localStorage.getItem("vessel_auth") || "";
       return fetch(`/api${path}`, {
         ...options,
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${password}`,
+          "Authorization": `Bearer ${authToken}`,
           ...options.headers,
         },
       });
@@ -321,7 +339,8 @@ function App() {
 
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsHost = window.location.protocol === "https:" ? window.location.host : `${window.location.hostname}:3001`;
-  const wsToken = localStorage.getItem("vessel_auth") || "";
+  // 세션 토큰 우선, 없으면 구 비밀번호 폴백 (WS URL에 평문 비밀번호 노출 방지)
+  const wsToken = localStorage.getItem("vessel_token") || localStorage.getItem("vessel_auth") || "";
   const wsUrl = `${proto}//${wsHost}/ws?token=${encodeURIComponent(wsToken)}`;
 
   const dismissToast = useCallback((id) => {

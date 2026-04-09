@@ -143,6 +143,17 @@ async function processVesselData(prisma, vessels, d, logFn, onPosition, onZoneEv
   }
 }
 
+/** 동시성 제한 병렬 실행 (API rate limit 보호) */
+async function parallelLimit(items, fn, concurrency = 5) {
+  const results = [];
+  for (let i = 0; i < items.length; i += concurrency) {
+    const chunk = items.slice(i, i + concurrency);
+    const chunkResults = await Promise.allSettled(chunk.map(fn));
+    results.push(...chunkResults);
+  }
+  return results;
+}
+
 export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZoneEvent) {
   let tasks = [];
   let currentCron = null;
@@ -207,19 +218,20 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
       mmsiGroups.get(v.mmsi).push(v);
     }
 
-    logger.info(`[Datalastic] 📡 Polling ${mmsiGroups.size} unique MMSI(s) / ${allVessels.length} vessel(s) at ${new Date().toISOString()}`);
+    const mmsiEntries = [...mmsiGroups.entries()];
+    logger.info(`[Datalastic] 📡 Polling ${mmsiEntries.length} unique MMSI(s) / ${allVessels.length} vessel(s) at ${new Date().toISOString()}`);
 
-    for (const [mmsi, vesselGroup] of mmsiGroups) {
+    await parallelLimit(mmsiEntries, async ([mmsi, vesselGroup]) => {
       const primary = vesselGroup[0];
       const params = primary.imo ? { imo: primary.imo } : { mmsi: primary.mmsi };
       const res = await apiCall("vessel", params);
       try { await prisma.apiUsage.create({ data: { endpoint: "vessel", credits: 1, account: null } }); } catch {}
       if (!res?.data) {
         logger.warn(`[Datalastic] ⚠ No data for ${primary.imo ? "IMO " + primary.imo : "MMSI " + mmsi}`);
-        continue;
+        return;
       }
       await processVesselData(prisma, vesselGroup, res.data, null, onPosition, onZoneEvent);
-    }
+    }, 5); // Datalastic rate limit 대비 최대 5개 동시 요청
   }
 
   // cron 스케줄 시작 헬퍼

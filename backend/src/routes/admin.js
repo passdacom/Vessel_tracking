@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getAccountNames, clearAccountCache } from "../accounts.js";
+import { invalidateAccount } from "../sessions.js";
 import { logger } from "../utils/logger.js";
 
 export default function adminRoutes(prisma) {
@@ -191,6 +192,7 @@ export default function adminRoutes(prisma) {
       }
       await prisma.account.update({ where: { name }, data: { password: newPassword } });
       clearAccountCache();
+      invalidateAccount(name); // 기존 세션 즉시 무효화
       logger.info(`[Admin] 비밀번호 변경: ${name}`);
       res.json({ success: true });
     } catch (e) {
