@@ -127,6 +127,71 @@ async function run() {
   `;
   console.log("\n[마이그레이션 후 Vessel 컬럼]", finalCols.map(c => c.column_name).join(", "));
 
+  // ─── v2 마이그레이션: 계정 관리 + 다계정 선박 공유 + 시스템 설정 ───────────
+
+  // 9. Account.vesselLimit 컬럼 추가
+  const accountCols = await p.$queryRaw`
+    SELECT column_name FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'Account'
+  `;
+  const acctColNames = accountCols.map(c => c.column_name);
+
+  if (!acctColNames.includes("vesselLimit")) {
+    await p.$executeRawUnsafe(`ALTER TABLE "Account" ADD COLUMN "vesselLimit" INTEGER NOT NULL DEFAULT 100`);
+    console.log("✅ Account.vesselLimit 컬럼 추가 (기본값: 100)");
+  } else {
+    console.log("✓ Account.vesselLimit 이미 존재");
+  }
+
+  // 10. Vessel.mmsi @unique → @@unique([account, mmsi]) 변경
+  //    기존 unique 인덱스 확인 후 교체
+  const indexes = await p.$queryRaw`
+    SELECT indexname FROM pg_indexes
+    WHERE tablename = 'Vessel' AND schemaname = 'public'
+  `;
+  const indexNames = indexes.map(i => i.indexname);
+
+  // 기존 Vessel_mmsi_key 제거
+  if (indexNames.includes("Vessel_mmsi_key")) {
+    await p.$executeRawUnsafe(`ALTER TABLE "Vessel" DROP CONSTRAINT IF EXISTS "Vessel_mmsi_key"`);
+    console.log("✅ Vessel_mmsi_key unique 제약 제거");
+  }
+
+  // 복합 unique 추가 (이미 있으면 스킵)
+  if (!indexNames.includes("Vessel_account_mmsi_key")) {
+    await p.$executeRawUnsafe(`ALTER TABLE "Vessel" ADD CONSTRAINT "Vessel_account_mmsi_key" UNIQUE ("account", "mmsi")`);
+    console.log("✅ Vessel(account, mmsi) 복합 unique 제약 추가");
+  } else {
+    console.log("✓ Vessel(account, mmsi) 복합 unique 이미 존재");
+  }
+
+  // 11. SystemConfig 테이블 생성
+  const tablesAfter = await p.$queryRaw`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+  `;
+  const tableNamesAfter = tablesAfter.map(t => t.table_name);
+
+  if (!tableNamesAfter.includes("SystemConfig")) {
+    await p.$executeRawUnsafe(`
+      CREATE TABLE "SystemConfig" (
+        "id" SERIAL PRIMARY KEY,
+        "key" TEXT UNIQUE NOT NULL,
+        "value" TEXT NOT NULL,
+        "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    // 기본 폴링 설정 삽입
+    await p.$executeRawUnsafe(`
+      INSERT INTO "SystemConfig" ("key", "value", "updatedAt")
+      VALUES ('poll_cron', '0 4,6,8,11,15,23 * * *', NOW()),
+             ('poll_enabled', 'true', NOW())
+    `);
+    console.log("✅ SystemConfig 테이블 생성 및 기본값 삽입");
+  } else {
+    console.log("✓ SystemConfig 테이블 이미 존재");
+  }
+
   console.log("\n=== 마이그레이션 완료 ===");
   await p.$disconnect();
 }

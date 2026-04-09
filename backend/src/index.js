@@ -13,6 +13,7 @@ import { createDatalasticPoller } from "./services/datalasticPoller.js";
 import { startCleanupJob } from "./services/cleanup.js";
 import { authenticate, clearAccountCache } from "./accounts.js";
 import { geofenceChecker } from "./services/geofenceChecker.js";
+import { logger } from "./utils/logger.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -87,7 +88,7 @@ app.use(async (req, res, next) => {
     req.accountRole = account.role;
     next();
   } catch (e) {
-    console.error("[auth middleware] error:", e.message);
+    logger.error("[auth middleware] error:", e.message);
     res.status(500).json({ error: "Authentication error" });
   }
 });
@@ -161,10 +162,12 @@ async function init() {
 
   const vessels = await prisma.vessel.findMany();
   httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ Server running at http://0.0.0.0:${PORT}`);
-    console.log(`📡 Tracking ${vessels.length} vessel(s) via Datalastic`);
+    logger.info(`✅ Server running at http://0.0.0.0:${PORT}`);
+    logger.info(`📡 Tracking ${vessels.length} vessel(s) via Datalastic`);
   });
 }
 
-init().catch((e) => { console.error("Failed to start:", e); process.exit(1); });
+init().catch((e) => { logger.error("Failed to start:", e); process.exit(1); });
 process.on("SIGINT", async () => { datalasticPoller.stop(); await prisma.$disconnect(); process.exit(0); });
+process.on("uncaughtException", (err) => { logger.error("[uncaughtException]", err); });
+process.on("unhandledRejection", (reason) => { logger.error("[unhandledRejection]", reason); });

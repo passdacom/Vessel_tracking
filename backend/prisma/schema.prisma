@@ -9,7 +9,7 @@ datasource db {
 
 model Vessel {
   id           Int        @id @default(autoincrement())
-  mmsi         String     @unique
+  mmsi         String
   name         String?
   alias        String?
   account      String     @default("kb")
@@ -35,6 +35,7 @@ model Vessel {
   positions    Position[]
   zoneEvents   ZoneEvent[]
 
+  @@unique([account, mmsi])
   @@index([account])
 }
 
@@ -87,11 +88,19 @@ model Port {
 }
 
 model Account {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique  // "kb", "kdgc", "admin"
+  password    String
+  role        String   @default("user") // "user", "admin"
+  vesselLimit Int      @default(100)    // 계정별 최대 선박 수
+  createdAt   DateTime @default(now())
+}
+
+model SystemConfig {
   id        Int      @id @default(autoincrement())
-  name      String   @unique  // "kb", "kdgc", "admin"
-  password  String
-  role      String   @default("user") // "user", "admin"
-  createdAt DateTime @default(now())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model ApiUsage {

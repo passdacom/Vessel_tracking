@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { VESSEL_COLORS } from "../utils/colors.js";
 import { apiCall, checkSpoofing } from "../services/datalasticPoller.js";
+import { logger } from "../utils/logger.js";
 
 /** parseInt 실패(NaN, 음수) 시 null 반환 */
 function parseId(idStr) {
@@ -102,7 +103,7 @@ export default function vesselRoutes(prisma) {
         }));
       res.json(vessels);
     } catch (e) {
-      console.error("Vessel search error:", e.message);
+      logger.error("[vessels] search error:", e.message);
       res.status(500).json({ error: "검색 중 오류가 발생했습니다" });
     }
   });
@@ -117,7 +118,7 @@ export default function vesselRoutes(prisma) {
         orderBy: { createdAt: "asc" },
       });
       res.json(vessels);
-    } catch (e) { console.error("[/api/vessels] findMany error:", e.message); res.status(500).json({ error: "Internal server error" }); }
+    } catch (e) { logger.error("[/api/vessels] findMany error:", e.message); res.status(500).json({ error: "Internal server error" }); }
   });
 
   // Get position history
@@ -202,6 +203,18 @@ export default function vesselRoutes(prisma) {
       // admin이 추가할 때 account 지정 가능, 일반 계정은 자기 계정
       const account = (req.accountRole === "admin" && req.body.account) ? req.body.account : req.account;
 
+      // vesselLimit 체크 (admin은 면제)
+      if (req.accountRole !== "admin") {
+        const [existingCount, acct] = await Promise.all([
+          prisma.vessel.count({ where: { account } }),
+          prisma.account.findUnique({ where: { name: account }, select: { vesselLimit: true } }),
+        ]);
+        const limit = acct?.vesselLimit ?? 100;
+        if (existingCount >= limit) {
+          return res.status(400).json({ error: `선박 등록 한도(${limit}척)에 도달했습니다. 관리자에게 문의하세요.` });
+        }
+      }
+
       const existingCount = await prisma.vessel.count({ where: { account } });
       const assignedColor = color || VESSEL_COLORS[existingCount % VESSEL_COLORS.length];
       const vessel = await prisma.vessel.create({
@@ -217,7 +230,8 @@ export default function vesselRoutes(prisma) {
         poller.forceUpdate(null, [mmsi]).catch(() => {});
       }
     } catch (e) {
-      if (e.code === "P2002") return res.status(409).json({ error: "Vessel already registered" });
+      if (e.code === "P2002") return res.status(409).json({ error: "이미 해당 계정에 등록된 선박입니다" });
+      logger.error("[vessels] add vessel error:", e.message);
       res.status(500).json({ error: "Internal server error" });
     }
   });

@@ -74,6 +74,19 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
   const [showPwChange, setShowPwChange] = useState(null);
   const [newPw, setNewPw] = useState("");
 
+  // ── 계정 관리 상태 ──
+  const [showCreateAccount, setShowCreateAccount] = useState(false);
+  const [newAccName, setNewAccName] = useState("");
+  const [newAccPw, setNewAccPw] = useState("");
+  const [newAccLimit, setNewAccLimit] = useState(100);
+  const [showEditLimit, setShowEditLimit] = useState(null); // account name
+  const [editLimitVal, setEditLimitVal] = useState(100);
+
+  // ── 폴링 설정 상태 ──
+  const [settings, setSettings] = useState(null);
+  const [editCron, setEditCron] = useState("");
+  const [editCronSaving, setEditCronSaving] = useState(false);
+
   // ── 데이터 강제 수신 상태 ──
   const [fetchVesselId, setFetchVesselId] = useState("");
   const [fetchDays, setFetchDays] = useState(7);
@@ -89,14 +102,20 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [ovRes, vsRes, acRes] = await Promise.all([
+      const [ovRes, vsRes, acRes, stRes] = await Promise.all([
         apiFetch("/admin/overview"),
         apiFetch("/admin/vessels"),
         apiFetch("/admin/accounts"),
+        apiFetch("/admin/settings"),
       ]);
       if (ovRes.ok) setOverview(await ovRes.json());
       if (vsRes.ok) setVessels(await vsRes.json());
       if (acRes.ok) setAccounts(await acRes.json());
+      if (stRes.ok) {
+        const s = await stRes.json();
+        setSettings(s);
+        setEditCron(s.poll_cron || "0 4,6,8,11,15,23 * * *");
+      }
     } catch (e) {
       console.error("Admin fetch error:", e);
     }
@@ -169,9 +188,88 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
       method: "PATCH",
       body: JSON.stringify({ active: !currentActive }),
     });
-    if (res.ok) {
-      fetchData();
+    if (res.ok) { fetchData(); }
+  };
+
+  const handleCreateAccount = async () => {
+    if (!newAccName || newAccPw.length < 4) {
+      setActionMsg("계정명과 비밀번호(4자 이상)를 입력해주세요");
+      setTimeout(() => setActionMsg(""), 3000);
+      return;
     }
+    const res = await apiFetch("/admin/accounts", {
+      method: "POST",
+      body: JSON.stringify({ name: newAccName, password: newAccPw, vesselLimit: newAccLimit }),
+    });
+    if (res.ok) {
+      setActionMsg(`계정 "${newAccName}" 생성 완료`);
+      setShowCreateAccount(false);
+      setNewAccName(""); setNewAccPw(""); setNewAccLimit(100);
+      fetchData();
+    } else {
+      const err = await res.json();
+      setActionMsg(err.error || "생성 실패");
+    }
+    setTimeout(() => setActionMsg(""), 3000);
+  };
+
+  const handleDeleteAccount = async (accountName) => {
+    if (!window.confirm(`"${accountName}" 계정을 삭제하시겠습니까?`)) return;
+    const res = await apiFetch(`/admin/accounts/${accountName}`, { method: "DELETE" });
+    if (res.ok) {
+      setActionMsg(`계정 "${accountName}" 삭제 완료`);
+      fetchData();
+    } else {
+      const err = await res.json();
+      setActionMsg(err.error || "삭제 실패");
+    }
+    setTimeout(() => setActionMsg(""), 4000);
+  };
+
+  const handleUpdateLimit = async (accountName) => {
+    const res = await apiFetch(`/admin/accounts/${accountName}/vessel-limit`, {
+      method: "PATCH",
+      body: JSON.stringify({ vesselLimit: editLimitVal }),
+    });
+    if (res.ok) {
+      setActionMsg(`${accountName} 선박 한도 → ${editLimitVal}척`);
+      setShowEditLimit(null);
+      fetchData();
+    } else {
+      const err = await res.json();
+      setActionMsg(err.error || "변경 실패");
+    }
+    setTimeout(() => setActionMsg(""), 3000);
+  };
+
+  const handleSaveSettings = async () => {
+    setEditCronSaving(true);
+    const res = await apiFetch("/admin/settings", {
+      method: "PUT",
+      body: JSON.stringify({ poll_cron: editCron }),
+    });
+    if (res.ok) {
+      setActionMsg("폴링 스케줄 저장 완료");
+      const data = await res.json();
+      setSettings((prev) => ({ ...prev, ...data }));
+    } else {
+      const err = await res.json();
+      setActionMsg(err.error || "저장 실패");
+    }
+    setEditCronSaving(false);
+    setTimeout(() => setActionMsg(""), 3000);
+  };
+
+  const handleTogglePoll = async (enabled) => {
+    const res = await apiFetch("/admin/settings", {
+      method: "PUT",
+      body: JSON.stringify({ poll_enabled: enabled }),
+    });
+    if (res.ok) {
+      setActionMsg(enabled ? "폴링 활성화" : "폴링 비활성화");
+      setSettings((prev) => ({ ...prev, poll_enabled: enabled }));
+    }
+    setTimeout(() => setActionMsg(""), 3000);
   };
 
   if (loading) {
@@ -375,40 +473,216 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
           </div>
         )}
 
-        {/* 계정 비밀번호 관리 */}
-        {accounts.length > 0 && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-gray-300 mb-3">계정 비밀번호 관리</h2>
-            <div className="space-y-2">
-              {accounts.map((acct) => (
-                <div key={acct.name} className="flex items-center justify-between bg-gray-800 rounded-lg px-3 py-2">
-                  <div>
-                    <span className="text-sm font-medium text-white">{acct.name.toUpperCase()}</span>
-                    <span className="text-xs text-gray-500 ml-2">{acct.role}</span>
-                  </div>
-                  {showPwChange === acct.name ? (
+        {/* ── 계정 관리 ── */}
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-300">계정 관리</h2>
+            <button
+              onClick={() => { setShowCreateAccount((v) => !v); setNewAccName(""); setNewAccPw(""); setNewAccLimit(100); }}
+              className="text-xs px-2 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded transition"
+            >
+              + 계정 추가
+            </button>
+          </div>
+
+          {/* 계정 추가 폼 */}
+          {showCreateAccount && (
+            <div className="mb-3 bg-gray-800 rounded-lg p-3 space-y-2">
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] text-gray-500 block mb-1">계정명</label>
+                  <input
+                    type="text"
+                    value={newAccName}
+                    onChange={(e) => setNewAccName(e.target.value)}
+                    placeholder="예: kdgc2"
+                    className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1.5 border border-gray-600 focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-500 block mb-1">비밀번호 (4자 이상)</label>
+                  <input
+                    type="text"
+                    value={newAccPw}
+                    onChange={(e) => setNewAccPw(e.target.value)}
+                    placeholder="초기 비밀번호"
+                    className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1.5 border border-gray-600 focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-500 block mb-1">선박 한도</label>
+                  <input
+                    type="number"
+                    value={newAccLimit}
+                    onChange={(e) => setNewAccLimit(parseInt(e.target.value) || 100)}
+                    min={1} max={1000}
+                    className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1.5 border border-gray-600 focus:border-blue-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button onClick={handleCreateAccount} className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded">생성</button>
+                <button onClick={() => setShowCreateAccount(false)} className="text-xs px-3 py-1 bg-gray-700 text-gray-400 rounded">취소</button>
+              </div>
+            </div>
+          )}
+
+          {/* 계정 목록 */}
+          <div className="space-y-2">
+            {accounts.map((acct) => {
+              const acctOverview = overview?.accounts?.find((a) => a.name === acct.name);
+              const usedVessels = acctOverview?.vesselCount ?? 0;
+              const limitVal = acct.vesselLimit ?? 100;
+              return (
+                <div key={acct.name} className="bg-gray-800 rounded-lg px-3 py-2">
+                  <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={newPw}
-                        onChange={(e) => setNewPw(e.target.value)}
-                        placeholder="새 비밀번호"
-                        className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 w-32"
-                        autoFocus
-                        onKeyDown={(e) => { if (e.key === "Enter") handleChangePassword(acct.name); }}
-                      />
-                      <button onClick={() => handleChangePassword(acct.name)} className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded">변경</button>
-                      <button onClick={() => { setShowPwChange(null); setNewPw(""); }} className="text-xs px-2 py-1 bg-gray-700 text-gray-400 rounded">취소</button>
+                      <span className="text-sm font-medium text-white">{acct.name.toUpperCase()}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${acct.role === "admin" ? "bg-yellow-900 text-yellow-400" : "bg-gray-700 text-gray-400"}`}>
+                        {acct.role}
+                      </span>
+                      {acct.role !== "admin" && (
+                        <span className="text-[10px] text-gray-500">
+                          선박 {usedVessels}/{limitVal}척
+                        </span>
+                      )}
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => { setShowPwChange(acct.name); setNewPw(""); }}
-                      className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 rounded transition"
-                    >
-                      비밀번호 변경
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {/* 선박 한도 변경 */}
+                      {acct.role !== "admin" && (
+                        showEditLimit === acct.name ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={editLimitVal}
+                              onChange={(e) => setEditLimitVal(parseInt(e.target.value) || 1)}
+                              min={1} max={1000}
+                              className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 w-16"
+                              autoFocus
+                              onKeyDown={(e) => { if (e.key === "Enter") handleUpdateLimit(acct.name); }}
+                            />
+                            <span className="text-[10px] text-gray-500">척</span>
+                            <button onClick={() => handleUpdateLimit(acct.name)} className="text-xs px-1.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded">저장</button>
+                            <button onClick={() => setShowEditLimit(null)} className="text-xs px-1.5 py-1 bg-gray-700 text-gray-400 rounded">✕</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setShowEditLimit(acct.name); setEditLimitVal(limitVal); }}
+                            className="text-[10px] px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 rounded transition"
+                            title="선박 한도 변경"
+                          >
+                            한도수정
+                          </button>
+                        )
+                      )}
+                      {/* 비밀번호 변경 */}
+                      {showPwChange === acct.name ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={newPw}
+                            onChange={(e) => setNewPw(e.target.value)}
+                            placeholder="새 비밀번호"
+                            className="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 w-28"
+                            autoFocus
+                            onKeyDown={(e) => { if (e.key === "Enter") handleChangePassword(acct.name); }}
+                          />
+                          <button onClick={() => handleChangePassword(acct.name)} className="text-xs px-1.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded">변경</button>
+                          <button onClick={() => { setShowPwChange(null); setNewPw(""); }} className="text-xs px-1.5 py-1 bg-gray-700 text-gray-400 rounded">✕</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => { setShowPwChange(acct.name); setNewPw(""); }}
+                          className="text-[10px] px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-400 rounded transition"
+                        >
+                          비밀번호
+                        </button>
+                      )}
+                      {/* 계정 삭제 (admin 불가) */}
+                      {acct.role !== "admin" && showPwChange !== acct.name && showEditLimit !== acct.name && (
+                        <button
+                          onClick={() => handleDeleteAccount(acct.name)}
+                          className="text-[10px] px-2 py-1 text-gray-600 hover:text-red-400 hover:bg-red-950 rounded transition"
+                          title="계정 삭제"
+                        >
+                          삭제
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {/* 선박 한도 프로그레스 바 */}
+                  {acct.role !== "admin" && (
+                    <div className="mt-1.5">
+                      <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${usedVessels / limitVal > 0.9 ? "bg-red-500" : usedVessels / limitVal > 0.7 ? "bg-yellow-500" : "bg-blue-500"}`}
+                          style={{ width: `${Math.min(100, (usedVessels / limitVal) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── 폴링 스케줄 설정 ── */}
+        {settings && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-300">API 폴링 스케줄</h2>
+                <p className="text-[10px] text-gray-600 mt-0.5">cron 표현식 (UTC 기준) · KST = UTC+9</p>
+              </div>
+              <button
+                onClick={() => handleTogglePoll(settings.poll_enabled === false || settings.poll_enabled === "false")}
+                className={`text-xs px-3 py-1.5 rounded-lg transition ${
+                  settings.poll_enabled === false || settings.poll_enabled === "false"
+                    ? "bg-gray-700 text-gray-400 hover:bg-green-900 hover:text-green-400"
+                    : "bg-green-900/50 text-green-400 hover:bg-red-900/50 hover:text-red-400"
+                }`}
+              >
+                {settings.poll_enabled === false || settings.poll_enabled === "false" ? "● 비활성" : "● 활성"}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={editCron}
+                onChange={(e) => setEditCron(e.target.value)}
+                placeholder="0 4,6,8,11,15,23 * * *"
+                className="flex-1 bg-gray-800 border border-gray-700 text-white text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:border-blue-600"
+              />
+              <button
+                onClick={handleSaveSettings}
+                disabled={editCronSaving}
+                className="text-xs px-3 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white rounded-lg transition"
+              >
+                {editCronSaving ? "저장 중..." : "저장"}
+              </button>
+            </div>
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+              {[
+                { label: "KST 기본 (6회/일)", value: "0 4,6,8,11,15,23 * * *" },
+                { label: "4시간마다", value: "0 */4 * * *" },
+                { label: "6시간마다", value: "0 */6 * * *" },
+                { label: "매시간", value: "0 * * * *" },
+                { label: "KST 08:00 1회", value: "0 23 * * *" },
+                { label: "KST 08/20시", value: "0 23,11 * * *" },
+              ].map((preset) => (
+                <button
+                  key={preset.value}
+                  onClick={() => setEditCron(preset.value)}
+                  className={`text-[10px] px-2 py-1 rounded border transition text-left ${
+                    editCron === preset.value
+                      ? "border-blue-600 bg-blue-900/30 text-blue-300"
+                      : "border-gray-700 bg-gray-800 text-gray-500 hover:border-gray-600"
+                  }`}
+                >
+                  <span className="block font-mono">{preset.value}</span>
+                  <span className="text-gray-600">{preset.label}</span>
+                </button>
               ))}
             </div>
           </div>
