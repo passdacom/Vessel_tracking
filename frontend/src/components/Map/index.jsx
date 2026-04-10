@@ -1,70 +1,103 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, useMap } from "react-leaflet";
 import VesselMarker from "./VesselMarker.jsx";
 import VesselTrack from "./VesselTrack.jsx";
 import RestrictedZone from "./RestrictedZone.jsx";
-import DraggableVesselLabel from "./DraggableVesselLabel.jsx";
 import PortMarker from "./PortMarker.jsx";
 
-// 겹침 방지: 지정된 순서 옵션 (상단, 왼쪽, 오른쪽) - 3방향으로 축소
-function computeDynamicOffsets(vessels, positions, zoom) {
+// ── 픽셀 기반 라벨 방향 결정 ─────────────────────────────────────────────────
+// 선박 아이콘 반경(px), 라벨 화살표 높이(px), 라벨 크기 추정(px)
+const ICON_R   = 14;
+const ARROW_H  = 7;
+const LABEL_W  = 95;
+const LABEL_H  = 18;
+
+// direction별 라벨 바운딩박스 top-left (vessel 픽셀 좌표 기준)
+function getLabelBox(px, dir) {
+    const g = ICON_R + ARROW_H; // gap: 아이콘 엣지 + 화살표
+    switch (dir) {
+        case 'top':    return { x: px.x - LABEL_W / 2, y: px.y - g - LABEL_H };
+        case 'bottom': return { x: px.x - LABEL_W / 2, y: px.y + g };
+        case 'right':  return { x: px.x + g,            y: px.y - LABEL_H / 2 };
+        case 'left':   return { x: px.x - g - LABEL_W,  y: px.y - LABEL_H / 2 };
+        default:       return { x: px.x - LABEL_W / 2, y: px.y - g - LABEL_H };
+    }
+}
+
+function rectsOverlapArea(ax, ay, bx, by) {
+    const ox = Math.max(0, Math.min(ax + LABEL_W, bx + LABEL_W) - Math.max(ax, bx));
+    const oy = Math.max(0, Math.min(ay + LABEL_H, by + LABEL_H) - Math.max(ay, by));
+    return ox * oy;
+}
+
+function computeLabelDirections(vessels, positions, map) {
+    if (!map) return {};
+
+    const DIRS = ['top', 'right', 'bottom', 'left'];
+
+    // 위치 있는 선박만 픽셀 좌표로 변환
     const active = vessels
-        .map((v) => ({ vessel: v, pos: positions[v.id]?.[0] }))
-        .filter((x) => x.pos);
+        .map(v => ({ v, pos: positions[v.id]?.[0] }))
+        .filter(x => x.pos)
+        .map(({ v, pos }) => ({
+            v,
+            px: map.latLngToContainerPoint([pos.lat, pos.lon]),
+        }));
 
-    const offsets = {};
+    if (active.length === 0) return {};
 
-    // zoom이 클수록(확대) 겹침 허용, 작을수록(축소) 겹침 방지 임계값 증가
-    const threshold = 1.2 / Math.pow(2, Math.max(0, zoom - 5));
+    const result  = {};
+    const placed  = []; // 이미 배치된 라벨 박스들 { x, y }
 
-    const placed = [];
-    // 상(top)을 최우선으로 하고, 안되면 좌(left), 우(right)로만 회피
-    const dirs = ['top', 'left', 'right'];
+    for (const { v, px } of active) {
+        let bestDir   = 'top';
+        let minScore  = Infinity;
 
-    for (const { vessel, pos } of active) {
-        let bestDir = 'top';
-        let minCollisions = 999;
+        for (const dir of DIRS) {
+            const box = getLabelBox(px, dir);
+            let score = 0;
 
-        for (const d of dirs) {
-            let colls = 0;
-            let targetLat = pos.lat;
-            let targetLon = pos.lon;
-
-            if (d === 'right') targetLon += threshold;
-            if (d === 'left') targetLon -= threshold;
-            if (d === 'top') targetLat += threshold;
-
+            // 기배치 라벨과의 겹침 넓이
             for (const p of placed) {
-                let pLat = p.pos.lat;
-                let pLon = p.pos.lon;
-                if (p.dir === 'right') pLon += threshold;
-                if (p.dir === 'left') pLon -= threshold;
-                if (p.dir === 'top') pLat += threshold;
-
-                const dist = Math.sqrt((targetLat - pLat) ** 2 + (targetLon - pLon) ** 2);
-                if (dist < threshold * 1.5) {
-                    colls++;
-                }
+                score += rectsOverlapArea(box.x, box.y, p.x, p.y);
             }
 
-            if (colls < minCollisions) {
-                minCollisions = colls;
-                bestDir = d;
+            // 다른 선박 아이콘과의 겹침 (아이콘을 작은 사각형으로 근사)
+            for (const { px: opx } of active) {
+                if (opx === px) continue;
+                const ox = Math.max(0, Math.min(box.x + LABEL_W, opx.x + ICON_R) - Math.max(box.x, opx.x - ICON_R));
+                const oy = Math.max(0, Math.min(box.y + LABEL_H, opx.y + ICON_R) - Math.max(box.y, opx.y - ICON_R));
+                score += ox * oy * 2; // 아이콘 겹침은 더 높은 패널티
             }
-            if (colls === 0) break;
+
+            if (score < minScore) {
+                minScore = score;
+                bestDir  = dir;
+            }
+            if (score === 0) break; // 완벽한 배치, 조기 종료
         }
 
-        placed.push({ pos, dir: bestDir });
-
-        // 오프셋 처리.
-        let offsetPx = [0, 0];
-        if (bestDir === 'right') offsetPx = [12, 0];
-        if (bestDir === 'left') offsetPx = [-12, 0];
-        if (bestDir === 'top') offsetPx = [0, -12];
-
-        offsets[vessel.id] = { direction: bestDir, offset: offsetPx };
+        result[v.id] = bestDir;
+        placed.push(getLabelBox(px, bestDir));
     }
-    return offsets;
+
+    return result;
+}
+
+// ── 라벨 방향 계산 컴포넌트 (MapContainer 내부에서 실행) ─────────────────────
+function LabelDirectionComputer({ vessels, positions, onDirectionsChange }) {
+    const map = useMap();
+
+    useEffect(() => {
+        function compute() {
+            onDirectionsChange(computeLabelDirections(vessels, positions, map));
+        }
+        compute();
+        map.on('zoomend', compute);
+        return () => map.off('zoomend', compute);
+    }, [map, vessels, positions, onDirectionsChange]);
+
+    return null;
 }
 
 function MapController({ selectedVesselId, panTrigger, vessels, positions, selectedPort, portPanTrigger }) {
@@ -106,9 +139,11 @@ function PlaybackMapController({ position, follow }) {
 
 export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, zoneSettings, trackHours, selectedPort, portPanTrigger, playbackVesselId, playback, playbackFollow }) {
     const [zoom, setZoom] = useState(5);
+    const [labelDirections, setLabelDirections] = useState({});
     const isPlayback = !!playbackVesselId;
     const pbState = playback?.playbackState;
 
+    // setLabelDirections는 안정적인 setState이므로 useCallback 불필요
     return (
         <MapContainer
             center={[25.0, 55.0]}
@@ -124,8 +159,14 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
             />
             <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} selectedPort={selectedPort} portPanTrigger={portPanTrigger} />
             <RestrictedZone zoneSettings={zoneSettings} />
-
             <ZoomListener setZoom={setZoom} />
+
+            {/* 픽셀 기반 라벨 방향 계산 (zoom 변경 시 재계산) */}
+            <LabelDirectionComputer
+                vessels={vessels}
+                positions={positions}
+                onDirectionsChange={setLabelDirections}
+            />
 
             {/* 재생 중 자동 추적 */}
             {isPlayback && pbState?.currentPosition && (
@@ -138,6 +179,7 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
 
             {vessels.map((vessel) => {
                 const isPlaybackTarget = isPlayback && vessel.id === playbackVesselId;
+                const labelDirection = labelDirections[vessel.id] || 'top';
 
                 // 재생 대상 선박: 재생 위치로 마커/트랙 교체
                 if (isPlaybackTarget && pbState?.currentPosition) {
@@ -151,17 +193,13 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                                 isSelected={true}
                                 onClick={() => {}}
                                 trackHours={trackHours}
-                            />
-                            <DraggableVesselLabel
-                                vessel={vessel}
-                                position={pbState.currentPosition}
-                                trackHours={trackHours}
+                                labelDirection={labelDirection}
                             />
                         </React.Fragment>
                     );
                 }
 
-                // 일반 선박 (재생 중이 아닌 다른 선박 포함)
+                // 일반 선박
                 const vesselPositions = positions[vessel.id] || [];
                 const latest = vesselPositions[0];
 
@@ -169,20 +207,14 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                     <React.Fragment key={vessel.id}>
                         <VesselTrack positions={vesselPositions} color={vessel.color} />
                         {latest && (
-                            <>
-                                <VesselMarker
-                                    vessel={vessel}
-                                    position={latest}
-                                    isSelected={selectedVesselId === vessel.id}
-                                    onClick={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
-                                    trackHours={trackHours}
-                                />
-                                <DraggableVesselLabel
-                                    vessel={vessel}
-                                    position={latest}
-                                    trackHours={trackHours}
-                                />
-                            </>
+                            <VesselMarker
+                                vessel={vessel}
+                                position={latest}
+                                isSelected={selectedVesselId === vessel.id}
+                                onClick={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
+                                trackHours={trackHours}
+                                labelDirection={labelDirection}
+                            />
                         )}
                     </React.Fragment>
                 );

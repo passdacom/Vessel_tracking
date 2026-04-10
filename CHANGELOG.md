@@ -4,6 +4,28 @@
 
 ---
 
+## [2026-04-10] — 선박명 라벨 리팩토링 (충돌 회피 + 가독성 개선)
+
+### 변경 파일
+
+| 파일 | 유형 | 요약 |
+|------|------|------|
+| `frontend/src/components/Map/VesselMarker.jsx` | MODIFY | `Tooltip permanent` 추가; `labelDirection` prop; `tooltipAnchor` 방향 연동 |
+| `frontend/src/components/Map/index.jsx` | MODIFY | `DraggableVesselLabel` 제거; 픽셀 기반 8방향 충돌 회피 알고리즘 + `LabelDirectionComputer` 추가 |
+| `frontend/src/index.css` | MODIFY | `.vessel-name-tooltip` CSS (불투명 배경, 그림자, 화살표 색상) |
+
+### 주요 변경
+
+- **라벨 형태 변경**: 텍스트+그림자 → **불투명 흰색 배경 박스** (겹쳐도 각각 읽힘)
+- **충돌 회피**: `computeDynamicOffsets` (lat/lon 기반, dead code) → 픽셀 좌표 기반 4방향 그리디 알고리즘
+  - `map.latLngToContainerPoint()`로 실제 화면 픽셀 좌표 사용
+  - 라벨↔라벨, 라벨↔선박아이콘 겹침 넓이(px²) 최소화
+  - zoom 변경 시 자동 재계산 (`zoomend` 이벤트)
+- **드래그 기능 제거**: `DraggableVesselLabel.jsx` 미사용 (localStorage 라벨 위치 더 이상 적용 안 됨)
+- **stale 선박**: 회색 텍스트 + ⏸ 접두사 유지
+
+---
+
 ## [2026-04-10] — HRA 배지 미표시 / 배지 깜빡임 / 진입 로그 누락 버그 수정
 
 ### 버그 원인 분석

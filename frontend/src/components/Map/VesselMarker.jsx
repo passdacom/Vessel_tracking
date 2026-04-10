@@ -1,21 +1,32 @@
 import React, { useMemo, useState } from 'react';
-import { Marker, Popup } from 'react-leaflet';
+import { Marker, Popup, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 
-function createShipIcon(color, rotation, isSelected, isStale) {
-    const size = isSelected ? 34 : 26;
+// labelDirection에 따라 tooltipAnchor를 아이콘 엣지로 설정
+function getTooltipAnchor(direction, half) {
+    switch (direction) {
+        case 'bottom': return [0,  half];
+        case 'right':  return [half, 0];
+        case 'left':   return [-half, 0];
+        case 'top':
+        default:       return [0, -half];
+    }
+}
 
-    // stale 선박은 회색으로 채우고 투명도 낮춤
+function createShipIcon(color, rotation, isSelected, isStale, labelDirection = 'top') {
+    const size = isSelected ? 34 : 26;
+    const half = size / 2;
+
     const fillColor = isStale ? '#888888' : color;
     const strokeColor = isStale ? '#aaaaaa' : 'white';
 
     const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 28" width="${size}" height="${size}">
-      <polygon 
-        points="12,2 21,24 12,19 3,24" 
-        fill="${fillColor}" 
-        stroke="${strokeColor}" 
-        stroke-width="1.5" 
+      <polygon
+        points="12,2 21,24 12,19 3,24"
+        fill="${fillColor}"
+        stroke="${strokeColor}"
+        stroke-width="1.5"
         stroke-linejoin="round"
         ${isSelected ? `filter="url(#sel-glow)"` : ''}
       />
@@ -23,7 +34,6 @@ function createShipIcon(color, rotation, isSelected, isStale) {
     </svg>
   `;
 
-    // stale 선박: 전체 마커 div에 opacity 적용
     const wrapperStyle = isStale
         ? `transform: rotate(${rotation}deg); transform-origin: center; line-height: 0; opacity: 0.5;`
         : `transform: rotate(${rotation}deg); transform-origin: center; line-height: 0;`;
@@ -32,9 +42,9 @@ function createShipIcon(color, rotation, isSelected, isStale) {
         html: `<div style="${wrapperStyle}">${svg}</div>`,
         className: 'custom-vessel-icon',
         iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
-        popupAnchor: [0, -size / 2],
-        tooltipAnchor: [0, 0]
+        iconAnchor: [half, half],
+        popupAnchor: [0, -half],
+        tooltipAnchor: getTooltipAnchor(labelDirection, half),
     });
 }
 
@@ -67,14 +77,14 @@ function formatEta(eta) {
     );
 }
 
-export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24 }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24, labelDirection = 'top' }) {
     const rotation = position.heading ?? position.cog ?? 0;
 
     const isStale = Date.now() - new Date(position.timestamp) > trackHours * 60 * 60 * 1000;
 
     const icon = useMemo(
-        () => createShipIcon(vessel.color, rotation, isSelected, isStale),
-        [vessel.color, rotation, isSelected, isStale]
+        () => createShipIcon(vessel.color, rotation, isSelected, isStale, labelDirection),
+        [vessel.color, rotation, isSelected, isStale, labelDirection]
     );
 
     const [fuPw, setFuPw] = useState('');
@@ -113,6 +123,9 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
     const labelStyle = { color: '#9ca3af', paddingRight: 10, paddingBottom: 3, fontSize: 12 };
     const valueStyle = { fontWeight: 500, fontSize: 12 };
 
+    const labelText = (isStale ? '⏸ ' : '') + displayName;
+    const labelColor = isStale ? '#9ca3af' : vessel.color;
+
     return (
         <Marker
             position={[position.lat, position.lon]}
@@ -120,6 +133,17 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
+            {/* 선박명 라벨: 불투명 배경 박스, 방향은 충돌 회피 알고리즘이 결정 */}
+            <Tooltip
+                key={labelDirection}
+                permanent
+                direction={labelDirection}
+                className="vessel-name-tooltip"
+                interactive={false}
+            >
+                <span style={{ color: labelColor }}>{labelText}</span>
+            </Tooltip>
+
             <Popup>
                 <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>
                     {/* stale 배지 */}

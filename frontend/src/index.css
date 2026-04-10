@@ -157,6 +157,33 @@
   }
 }
 
+/* ── 선박명 라벨 Tooltip ─────────────────────────────────────────────────── */
+.vessel-name-tooltip {
+    background: rgba(255, 255, 255, 0.95) !important;
+    border: none !important;
+    border-radius: 3px !important;
+    padding: 2px 5px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    font-family: ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+    white-space: nowrap !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28) !important;
+    pointer-events: none !important;
+}
+/* 화살표 색상을 배경과 일치 */
+.vessel-name-tooltip.leaflet-tooltip-top::before {
+    border-top-color: rgba(255, 255, 255, 0.95) !important;
+}
+.vessel-name-tooltip.leaflet-tooltip-bottom::before {
+    border-bottom-color: rgba(255, 255, 255, 0.95) !important;
+}
+.vessel-name-tooltip.leaflet-tooltip-left::before {
+    border-left-color: rgba(255, 255, 255, 0.95) !important;
+}
+.vessel-name-tooltip.leaflet-tooltip-right::before {
+    border-right-color: rgba(255, 255, 255, 0.95) !important;
+}
+
 /* 스크롤바 전역 스타일 (다크 테마 톤 맞춤) */
 ::-webkit-scrollbar {
   width: 6px;
