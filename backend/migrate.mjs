@@ -151,10 +151,10 @@ async function run() {
   `;
   const indexNames = indexes.map(i => i.indexname);
 
-  // 기존 Vessel_mmsi_key 제거
+  // 기존 Vessel_mmsi_key 제거 (standalone index → DROP INDEX, not DROP CONSTRAINT)
   if (indexNames.includes("Vessel_mmsi_key")) {
-    await p.$executeRawUnsafe(`ALTER TABLE "Vessel" DROP CONSTRAINT IF EXISTS "Vessel_mmsi_key"`);
-    console.log("✅ Vessel_mmsi_key unique 제약 제거");
+    await p.$executeRawUnsafe(`DROP INDEX IF EXISTS "Vessel_mmsi_key"`);
+    console.log("✅ Vessel_mmsi_key unique 인덱스 제거");
   }
 
   // 복합 unique 추가 (이미 있으면 스킵)

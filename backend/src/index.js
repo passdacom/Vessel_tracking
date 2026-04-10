@@ -131,10 +131,16 @@ app.use("/api/ports", portRoutes(prisma));
 app.use("/api/admin", adminRoutes(prisma));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
-// ── 수동 강제 업데이트 (admin) ─────────────────────────────────────────────────
+// ── 수동 강제 업데이트 (admin 세션 또는 admin 비밀번호) ────────────────────────
 app.post("/api/force-update", async (req, res) => {
   if (req.accountRole !== "admin") {
-    return res.status(403).json({ error: "Admin only" });
+    // 비밀번호 직접 검증 (비 admin 계정에서도 admin 비밀번호 알면 허용)
+    const { password } = req.body;
+    if (!password) return res.status(401).json({ error: "비밀번호를 입력해주세요." });
+    const adminAccount = await prisma.account.findUnique({ where: { name: "admin" } });
+    if (!adminAccount || adminAccount.password !== password) {
+      return res.status(401).json({ error: "비밀번호가 올바르지 않습니다." });
+    }
   }
   const { mmsiList } = req.body;
 

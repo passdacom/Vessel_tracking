@@ -288,7 +288,11 @@ export default function vesselRoutes(prisma) {
       await logApiUsage(prisma, "vessel_hist", days, req.account);
 
       if (!result || (!result.data && !Array.isArray(result))) {
-        return res.status(502).json({ error: "Datalastic API 응답 없음", credits_used: days });
+        const isNotFound = result?.meta?.success === false;
+        const errMsg = isNotFound
+          ? "vessel_hist API를 사용할 수 없습니다 (현재 구독 플랜 미포함). 관리자에게 문의하세요."
+          : "Datalastic API 응답 없음";
+        return res.status(502).json({ error: errMsg, credits_used: 0 });
       }
 
       const records = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);

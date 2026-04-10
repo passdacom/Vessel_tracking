@@ -91,21 +91,60 @@ export default function adminRoutes(prisma) {
     }
   });
 
-  // Move vessel to different account
-  router.patch("/vessels/:id/account", async (req, res) => {
+  // Share vessel to additional account (creates new vessel record with same MMSI)
+  router.post("/vessels/:id/share", async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       if (!id) return res.status(400).json({ error: "Invalid vessel ID" });
-      const { account } = req.body;
+      const { targetAccount } = req.body;
+
       const validAccounts = await getAccountNames(prisma);
-      if (!validAccounts.includes(account)) {
+      if (!validAccounts.includes(targetAccount)) {
         return res.status(400).json({ error: `유효한 계정: ${validAccounts.join(", ")}` });
       }
-      const vessel = await prisma.vessel.update({ where: { id }, data: { account } });
-      res.json(vessel);
+
+      const source = await prisma.vessel.findUnique({ where: { id } });
+      if (!source) return res.status(404).json({ error: "Vessel not found" });
+      if (source.account === targetAccount) {
+        return res.status(409).json({ error: "이미 해당 계정에 등록된 선박입니다" });
+      }
+
+      const newVessel = await prisma.vessel.create({
+        data: {
+          mmsi: source.mmsi, account: targetAccount,
+          name: source.name, alias: source.alias, imo: source.imo,
+          callsign: source.callsign, color: source.color, companyType: source.companyType,
+          countryIso: source.countryIso, countryName: source.countryName,
+          vesselType: source.vesselType, typeSpecific: source.typeSpecific,
+          grossTonnage: source.grossTonnage, deadweight: source.deadweight,
+          length: source.length, breadth: source.breadth,
+          yearBuilt: source.yearBuilt, homePort: source.homePort,
+          speedAvg: source.speedAvg, speedMax: source.speedMax,
+          infoFetched: source.infoFetched, active: source.active,
+        },
+      });
+
+      // 최근 위치 데이터 복사 — 즉시 지도에 표시되도록
+      const recentPositions = await prisma.position.findMany({
+        where: { vesselId: source.id },
+        orderBy: { timestamp: "desc" },
+        take: 50,
+      });
+      if (recentPositions.length > 0) {
+        await prisma.position.createMany({
+          data: recentPositions.map(({ id: _id, vesselId: _vid, ...rest }) => ({
+            ...rest,
+            vesselId: newVessel.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      logger.info(`[Admin] 선박 공유: MMSI ${source.mmsi} → ${targetAccount} (위치 ${recentPositions.length}건 복사)`);
+      res.status(201).json(newVessel);
     } catch (e) {
-      if (e.code === "P2025") return res.status(404).json({ error: "Vessel not found" });
-      logger.error("[Admin] move vessel error:", e.message);
+      if (e.code === "P2002") return res.status(409).json({ error: "이미 해당 계정에 등록된 선박입니다" });
+      logger.error("[Admin] share vessel error:", e.message);
       res.status(500).json({ error: "Internal server error" });
     }
   });

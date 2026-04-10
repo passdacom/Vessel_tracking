@@ -141,16 +141,29 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { fetchZoneEvents(zoneEventsFilter); }, [fetchZoneEvents, zoneEventsFilter]);
 
-  const handleMoveVessel = async (vesselId, targetAccount) => {
-    const res = await apiFetch(`/admin/vessels/${vesselId}/account`, {
-      method: "PATCH",
-      body: JSON.stringify({ account: targetAccount }),
+  const handleShareVessel = async (vesselId, targetAccount) => {
+    const res = await apiFetch(`/admin/vessels/${vesselId}/share`, {
+      method: "POST",
+      body: JSON.stringify({ targetAccount }),
     });
     if (res.ok) {
-      setActionMsg(`선박 ${vesselId}를 ${targetAccount} 계정으로 이동 완료`);
+      setActionMsg(`선박 공유 → ${targetAccount} 완료`);
       fetchData();
     } else {
-      setActionMsg("이동 실패");
+      const err = await res.json().catch(() => ({}));
+      setActionMsg(err.error || "공유 실패");
+    }
+    setTimeout(() => setActionMsg(""), 3000);
+  };
+
+  const handleUnshareVessel = async (vesselId, accountName, mmsi) => {
+    if (!window.confirm(`MMSI ${mmsi}을 ${accountName} 계정에서 제거하시겠습니까?`)) return;
+    const res = await apiFetch(`/vessels/${vesselId}`, { method: "DELETE" });
+    if (res.ok) {
+      setActionMsg(`${accountName}에서 선박 제거 완료`);
+      fetchData();
+    } else {
+      setActionMsg("제거 실패");
     }
     setTimeout(() => setActionMsg(""), 3000);
   };
@@ -285,6 +298,21 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
     : vessels;
 
   const accountNames = overview?.accounts?.map((a) => a.name) || [];
+
+  // MMSI별 보유 계정 맵 {mmsi: [{id, account}]}
+  const mmsiAccounts = {};
+  for (const v of vessels) {
+    if (!mmsiAccounts[v.mmsi]) mmsiAccounts[v.mmsi] = [];
+    mmsiAccounts[v.mmsi].push({ id: v.id, account: v.account });
+  }
+
+  // MMSI 기준 중복 제거 (같은 선박이 여러 계정에 공유돼도 1행만 표시)
+  const seenMmsi = new Set();
+  const displayVessels = filteredVessels.filter((v) => {
+    if (seenMmsi.has(v.mmsi)) return false;
+    seenMmsi.add(v.mmsi);
+    return true;
+  });
 
   const prediction = calcApiPrediction(overview);
 
@@ -712,24 +740,23 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
                 </span>
               )}
             </h2>
-            <span className="text-xs text-gray-500">{filteredVessels.length}척</span>
+            <span className="text-xs text-gray-500">{displayVessels.length}척</span>
           </div>
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs text-gray-500 border-b border-gray-800">
-                  <th className="text-left px-4 py-2">계정</th>
                   <th className="text-left px-4 py-2">선박명</th>
                   <th className="text-left px-4 py-2">MMSI</th>
                   <th className="text-left px-4 py-2">상태</th>
                   <th className="text-left px-4 py-2">마지막 신호</th>
                   <th className="text-left px-4 py-2">폴링</th>
-                  <th className="text-right px-4 py-2">관리</th>
+                  <th className="text-right px-4 py-2">계정 관리</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredVessels.map((v) => {
+                {displayVessels.map((v) => {
                   const pos = v.positions?.[0];
                   const isActive = v.active !== false;
                   return (
@@ -737,11 +764,6 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
                       key={v.id}
                       className={`border-b border-gray-800/50 hover:bg-gray-800/50 ${!isActive ? "opacity-50" : ""}`}
                     >
-                      <td className="px-4 py-2">
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 font-mono">
-                          {v.account}
-                        </span>
-                      </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center gap-2">
                           <div className="w-2 h-2 rounded-full" style={{ backgroundColor: v.color }} />
@@ -776,35 +798,42 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
                         </button>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {/* 계정 이동 */}
-                          <select
-                            value={v.account}
-                            onChange={(e) => {
-                              if (e.target.value !== v.account) handleMoveVessel(v.id, e.target.value);
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="bg-gray-800 text-gray-400 text-xs rounded px-1 py-0.5 border border-gray-700 cursor-pointer"
-                          >
-                            {accountNames.map((name) => (
-                              <option key={name} value={name}>{name}</option>
-                            ))}
-                          </select>
-                          <button
-                            onClick={() => handleDeleteVessel(v.id, v.alias || v.name || v.mmsi)}
-                            className="text-xs px-1.5 py-0.5 text-gray-500 hover:text-red-400 hover:bg-red-950 rounded transition"
-                            title="삭제"
-                          >
-                            삭제
-                          </button>
+                        <div className="flex items-center justify-end gap-1 flex-wrap">
+                          {/* 보유 계정 배지 */}
+                          {(mmsiAccounts[v.mmsi] || []).map(({ id: vid, account: acct }) => (
+                            <span key={vid} className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300 border border-gray-600">
+                              {acct}
+                              <button
+                                onClick={() => handleUnshareVessel(vid, acct, v.mmsi)}
+                                className="ml-0.5 text-gray-500 hover:text-red-400 leading-none"
+                                title={`${acct}에서 제거`}
+                              >×</button>
+                            </span>
+                          ))}
+                          {/* 공유 추가 */}
+                          {accountNames.filter((n) => !(mmsiAccounts[v.mmsi] || []).some((x) => x.account === n)).length > 0 && (
+                            <select
+                              value=""
+                              onChange={(e) => { if (e.target.value) handleShareVessel(v.id, e.target.value); }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="bg-gray-800 text-blue-400 text-[10px] rounded px-1 py-0.5 border border-dashed border-blue-800 cursor-pointer"
+                              title="계정에 공유 추가"
+                            >
+                              <option value="">+ 공유</option>
+                              {accountNames
+                                .filter((n) => !(mmsiAccounts[v.mmsi] || []).some((x) => x.account === n))
+                                .map((n) => <option key={n} value={n}>{n}</option>)
+                              }
+                            </select>
+                          )}
                         </div>
                       </td>
                     </tr>
                   );
                 })}
-                {filteredVessels.length === 0 && (
+                {displayVessels.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="text-center py-8 text-gray-600">
+                    <td colSpan={6} className="text-center py-8 text-gray-600">
                       선박이 없습니다
                     </td>
                   </tr>
