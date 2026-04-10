@@ -77,7 +77,7 @@ function formatEta(eta) {
     );
 }
 
-export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24, labelDirection = 'top' }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24, labelDirection = 'top', showLabels = true }) {
     const rotation = position.heading ?? position.cog ?? 0;
 
     const isStale = Date.now() - new Date(position.timestamp) > trackHours * 60 * 60 * 1000;
@@ -134,15 +134,17 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
             zIndexOffset={isSelected ? 1000 : 0}
         >
             {/* 선박명 라벨: 불투명 배경 박스, 방향은 충돌 회피 알고리즘이 결정 */}
-            <Tooltip
-                key={labelDirection}
-                permanent
-                direction={labelDirection}
-                className="vessel-name-tooltip"
-                interactive={false}
-            >
-                <span style={{ color: labelColor }}>{labelText}</span>
-            </Tooltip>
+            {showLabels && (
+                <Tooltip
+                    key={labelDirection}
+                    permanent
+                    direction={labelDirection}
+                    className="vessel-name-tooltip"
+                    interactive={false}
+                >
+                    <span style={{ color: labelColor }}>{labelText}</span>
+                </Tooltip>
+            )}
 
             <Popup>
                 <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>

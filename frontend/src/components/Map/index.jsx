@@ -137,7 +137,7 @@ function PlaybackMapController({ position, follow }) {
     return null;
 }
 
-export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, zoneSettings, trackHours, selectedPort, portPanTrigger, playbackVesselId, playback, playbackFollow }) {
+export default function Map({ vessels, positions, selectedVesselId, panTrigger, onSelectVessel, zoneSettings, trackHours, selectedPort, portPanTrigger, playbackVesselId, playback, playbackFollow, showLabels = true }) {
     const [zoom, setZoom] = useState(5);
     const [labelDirections, setLabelDirections] = useState({});
     const isPlayback = !!playbackVesselId;
@@ -194,6 +194,7 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                                 onClick={() => {}}
                                 trackHours={trackHours}
                                 labelDirection={labelDirection}
+                                showLabels={showLabels}
                             />
                         </React.Fragment>
                     );
@@ -214,6 +215,7 @@ export default function Map({ vessels, positions, selectedVesselId, panTrigger, 
                                 onClick={() => onSelectVessel(vessel.id === selectedVesselId ? null : vessel.id)}
                                 trackHours={trackHours}
                                 labelDirection={labelDirection}
+                                showLabels={showLabels}
                             />
                         )}
                     </React.Fragment>

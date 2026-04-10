@@ -32,6 +32,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     onSelectVessel, selectedVesselId, wsConnected,
     onShowShare, onLogout, onOpenSettings, onOpenGuide, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
+    showLabels = true, onToggleLabels,
     customGroups = [],
     apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched, onOpenZoneSettings,
     sidebarWidth = 288 }) {
@@ -176,7 +177,22 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                         </svg>
                         {activeVessels.every(v => hiddenVessels.has(v.id)) ? "전체 표시" : "전체 숨기기"}
                     </button>
-                    <span className="text-gray-600 text-xs">
+                    {/* 라벨 숨기기/표시 토글 */}
+                    <button
+                        onClick={onToggleLabels}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all ${showLabels
+                            ? "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                            : "bg-gray-800 hover:bg-gray-700 text-gray-500 line-through"
+                            }`}
+                        title={showLabels ? "선박명 라벨 숨기기" : "선박명 라벨 표시"}
+                    >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                        </svg>
+                        라벨
+                    </button>
+
+                    <span className="text-gray-600 text-xs ml-auto">
                         {activeVessels.filter(v => !hiddenVessels.has(v.id)).length}/{activeVessels.length} 표시중
                     </span>
                 </div>

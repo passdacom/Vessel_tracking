@@ -183,6 +183,15 @@ function App() {
     setIsAuthed(false);
   };
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
+  const [showLabels, setShowLabels] = useState(() => {
+    return localStorage.getItem("vessel_show_labels") !== "false";
+  });
+  const handleToggleLabels = () => {
+    setShowLabels(prev => {
+      localStorage.setItem("vessel_show_labels", String(!prev));
+      return !prev;
+    });
+  };
   const [showZoneSettings, setShowZoneSettings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
@@ -517,6 +526,8 @@ function App() {
             hiddenVessels={hiddenVessels}
             onToggleVessel={handleToggleVessel}
             onToggleAllVessels={handleToggleAllVessels}
+            showLabels={showLabels}
+            onToggleLabels={handleToggleLabels}
             onOpenZoneSettings={() => setShowZoneSettings(true)}
             customGroups={customGroups}
             selectedPort={selectedPort}
@@ -567,6 +578,7 @@ function App() {
           playbackVesselId={playbackVesselId}
           playback={playback}
           playbackFollow={playbackFollow}
+          showLabels={showLabels}
         />
         <ReportTable vessels={vessels.filter(v => v.active !== false)} positions={positions} />
         {playbackVesselId && (
