@@ -134,11 +134,18 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
             zIndexOffset={isSelected ? 1000 : 0}
         >
             {/* 선박명 라벨: 불투명 배경 박스, 방향은 충돌 회피 알고리즘이 결정 */}
-            {showLabels && (
+            {showLabels ? (
                 <Tooltip
                     key={labelDirection}
                     permanent
                     direction={labelDirection}
+                    className="vessel-name-tooltip"
+                    interactive={false}
+                >
+                    <span style={{ color: labelColor }}>{labelText}</span>
+                </Tooltip>
+            ) : (
+                <Tooltip
                     className="vessel-name-tooltip"
                     interactive={false}
                 >

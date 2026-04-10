@@ -180,9 +180,9 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                     {/* 라벨 숨기기/표시 토글 */}
                     <button
                         onClick={onToggleLabels}
-                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-all ${showLabels
-                            ? "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                            : "bg-gray-800 hover:bg-gray-700 text-gray-500 line-through"
+                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all border ${showLabels
+                            ? "bg-blue-700 hover:bg-blue-600 text-white border-blue-500"
+                            : "bg-gray-800 hover:bg-gray-700 text-gray-400 border-gray-600 border-dashed"
                             }`}
                         title={showLabels ? "선박명 라벨 숨기기" : "선박명 라벨 표시"}
                     >

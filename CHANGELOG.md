@@ -4,6 +4,24 @@
 
 ---
 
+## [2026-04-10] — 라벨 기본 OFF + 호버 표시 + 버튼 가시성 개선
+
+### 변경 파일
+
+| 파일 | 유형 | 요약 |
+|------|------|------|
+| `frontend/src/App.jsx` | MODIFY | `showLabels` 기본값 false로 변경 (localStorage `=== "true"`) |
+| `frontend/src/components/Sidebar/index.jsx` | MODIFY | 라벨 토글 버튼 스타일 개선 — ON: 파란색 solid, OFF: 점선 테두리 |
+| `frontend/src/components/Map/VesselMarker.jsx` | MODIFY | `showLabels=false`일 때 hover 툴팁으로 선박명 표시 |
+
+### 주요 변경
+
+- **기본 상태 변경**: 최초 접속/localStorage 미설정 시 라벨 꺼짐 (기존: 켜짐)
+- **버튼 가시성**: OFF 상태(기본) → 점선 테두리로 클릭 유도; ON 상태 → 파란색 filled로 활성 표시
+- **호버 툴팁**: 라벨 OFF 상태에서도 아이콘에 마우스 올리면 해당 선박명 툴팁 표시
+
+---
+
 ## [2026-04-10] — 선박명 라벨 리팩토링 (충돌 회피 + 가독성 개선)
 
 ### 변경 파일
