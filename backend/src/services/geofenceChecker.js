@@ -127,29 +127,61 @@ class GeofenceChecker {
 
   /**
    * 서버 시작 시 각 선박의 최신 위치로 현재 zone 상태 초기화
-   * → 재시작 후 첫 폴링에서 허위 entry 이벤트 방지
+   * - 재시작 후 첫 폴링에서 허위 entry 이벤트 방지
+   * - 이미 HRA 안에 있지만 DB에 entry 기록이 없는 선박은 entry 이벤트 복원
+   *   (last zoneEvent가 없거나 exit인 경우만 생성 → 중복 방지)
    */
   async initState(prisma) {
     try {
       const vessels = await prisma.vessel.findMany({
         where: { active: true },
-        select: { id: true },
+        select: { id: true, name: true, alias: true, mmsi: true },
       });
+
+      let restoredCount = 0;
 
       for (const v of vessels) {
         const lastPos = await prisma.position.findFirst({
           where: { vesselId: v.id, suspicious: false },
           orderBy: { timestamp: "desc" },
-          select: { lat: true, lon: true },
+          select: { lat: true, lon: true, timestamp: true },
         });
-        if (lastPos) {
-          const zones = new Set(this.checkPoint(lastPos.lon, lastPos.lat));
-          this.vesselZoneState.set(v.id, zones);
-        } else {
+
+        if (!lastPos) {
           this.vesselZoneState.set(v.id, new Set());
+          continue;
+        }
+
+        const zones = new Set(this.checkPoint(lastPos.lon, lastPos.lat));
+        this.vesselZoneState.set(v.id, zones);
+
+        // HRA 안에 있는 선박 중 DB에 entry 기록이 없거나 마지막이 exit인 경우 복원
+        for (const zoneName of zones) {
+          const lastEvent = await prisma.zoneEvent.findFirst({
+            where: { vesselId: v.id, zoneName },
+            orderBy: { createdAt: "desc" },
+            select: { eventType: true },
+          });
+
+          if (!lastEvent || lastEvent.eventType === "exit") {
+            await prisma.zoneEvent.create({
+              data: {
+                vesselId: v.id,
+                zoneName,
+                eventType: "entry",
+                lat: lastPos.lat,
+                lon: lastPos.lon,
+                posTimestamp: lastPos.timestamp,
+              },
+            });
+            restoredCount++;
+            const displayName = v.alias || v.name || v.mmsi;
+            console.log(`[Geofence] 📌 entry 복원: ${displayName} → ${zoneName}`);
+          }
         }
       }
-      console.log(`[Geofence] 🗺 State initialized for ${vessels.length} vessels`);
+
+      console.log(`[Geofence] 🗺 State initialized for ${vessels.length} vessels (entry 복원: ${restoredCount}건)`);
     } catch (e) {
       console.error("[Geofence] initState error:", e.message);
     }

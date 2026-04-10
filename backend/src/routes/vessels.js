@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { VESSEL_COLORS } from "../utils/colors.js";
 import { apiCall, checkSpoofing } from "../services/datalasticPoller.js";
+import { geofenceChecker } from "../services/geofenceChecker.js";
 import { logger } from "../utils/logger.js";
 
 /** parseInt 실패(NaN, 음수) 시 null 반환 */
@@ -145,6 +146,12 @@ export default function vesselRoutes(prisma) {
           orderBy: { timestamp: "desc" },
         });
         if (latest) positions = [latest];
+      }
+
+      // 최신 위치에 현재 HRA 구역 정보 주입 (페이지 로드 시 배지 즉시 표시)
+      if (positions.length > 0) {
+        const currentZones = geofenceChecker.getCurrentZones(id);
+        positions[0] = { ...positions[0], currentZones };
       }
 
       res.json(positions);

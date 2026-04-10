@@ -4,6 +4,34 @@
 
 ---
 
+## [2026-04-10] — HRA 배지 미표시 / 배지 깜빡임 / 진입 로그 누락 버그 수정
+
+### 버그 원인 분석
+
+| # | 증상 | 원인 |
+|---|------|------|
+| 1 | 기존 HRA 선박 배지 미표시 | `GET /positions` 응답에 `currentZones` 없음 (메모리 상태가 API에 미포함) |
+| 2 | 신규 추가 선박 배지 깜빡임 | WS `position` 이후 `vessel_added` 위치 재조회가 currentZones 없이 덮어씀 |
+| 3 | 기존 선박 진입 로그 없음 | `initState()`가 허위 entry 방지 목적으로만 작성돼 복원 로직 없었음 |
+
+### 변경 파일
+
+| 파일 | 유형 | 요약 |
+|------|------|------|
+| `backend/src/routes/vessels.js` | MODIFY | `geofenceChecker` import 추가; `GET /:id/positions` 응답의 `positions[0]`에 `currentZones` 주입 |
+| `backend/src/services/geofenceChecker.js` | MODIFY | `initState()`: 현재 HRA 내 선박 중 DB에 entry 기록 없는 경우 자동 복원 (중복 방지 로직 포함) |
+
+### 동작 변경
+
+- **페이지 로드 즉시**: 위치 API 응답의 최신 위치에 `currentZones` 포함 → 배지 즉시 표시
+- **신규 선박 추가**: `forceUpdate` 이후 위치 재조회해도 `currentZones` 유지 (race condition 해결)
+- **서버 재시작**: HRA 내 선박 중 entry 로그 없는 경우 자동 복원, Admin 로그에 즉시 표시
+- **중복 방지**: 마지막 이벤트가 이미 `entry`이면 복원 생략
+
+### API 변경 없음 (하위 호환)
+
+---
+
 ## [2026-03-17] — 선박 그룹 관리 기능 추가
 
 ### 변경 파일
