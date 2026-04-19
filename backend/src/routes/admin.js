@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getAccountNames, clearAccountCache } from "../accounts.js";
 import { invalidateAccount } from "../sessions.js";
 import { logger } from "../utils/logger.js";
+import { getLastCreditRemaining } from "../services/datalasticPoller.js";
 
 export default function adminRoutes(prisma) {
   const router = Router();
@@ -12,6 +13,21 @@ export default function adminRoutes(prisma) {
       return res.status(403).json({ error: "Admin access required" });
     }
     next();
+  });
+
+  // ── 크레딧 잔량 ──────────────────────────────────────────────────────────────
+  router.get("/credits", async (req, res) => {
+    try {
+      const { remaining, limit, checkedAt } = getLastCreditRemaining();
+      // 오늘 사용량
+      const today = new Date();
+      today.setUTCHours(0, 0, 0, 0);
+      const usageRows = await prisma.apiUsage.findMany({ where: { createdAt: { gte: today } } });
+      const todayUsed = usageRows.reduce((s, r) => s + r.credits, 0);
+      res.json({ remaining, limit, checkedAt, todayUsed });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ── Overview ───────────────────────────────────────────────────────────────

@@ -24,6 +24,8 @@ const TRACK_ALL = [
     { label: "7일", value: 168 },
     { label: "14일", value: 336 },
     { label: "30일", value: 720 },
+    { label: "60일", value: 1440 },
+    { label: "90일", value: 2160 },
 ];
 
 /* ── 데스크탑: 기존 사이드바 ── */
@@ -35,6 +37,7 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     showLabels = true, onToggleLabels,
     customGroups = [],
     apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched, onOpenZoneSettings,
+    onStartEta,
     sidebarWidth = 288 }) {
 
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
@@ -103,7 +106,8 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
             customGroups={allCustomGroups}
             apiFetch={apiFetch}
             onStartPlayback={onStartPlayback}
-            onHistoryFetched={onHistoryFetched} />
+            onHistoryFetched={onHistoryFetched}
+            onStartEta={onStartEta} />
     ));
 
     return (
@@ -321,8 +325,9 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
     onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel, onArchiveVessel, onRestoreVessel,
     onSelectVessel, selectedVesselId, wsConnected, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
+    showLabels = true, onToggleLabels,
     customGroups = [],
-    apiFetch, onStartPlayback, onHistoryFetched, onOpenZoneSettings }) {
+    apiFetch, onStartPlayback, onHistoryFetched, onOpenZoneSettings, onStartEta }) {
 
     const [open, setOpen] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
@@ -379,7 +384,8 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
             customGroups={allCustomGroups}
             apiFetch={apiFetch}
             onStartPlayback={onStartPlayback}
-            onHistoryFetched={onHistoryFetched} />
+            onHistoryFetched={onHistoryFetched}
+            onStartEta={onStartEta} />
     ));
 
     return (
@@ -469,14 +475,23 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                 </div>
 
                 {activeVessels.length > 0 && (
-                    <div style={{ padding: "8px 12px", borderBottom: "1px solid #374151", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+                    <div style={{ padding: "8px 12px", borderBottom: "1px solid #374151", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, gap: 6 }}>
                         <button onClick={onToggleAllVessels} style={{
                             background: activeVessels.every(v => hiddenVessels.has(v.id)) ? "#374151" : "#2563eb",
                             color: "#fff", border: "none", borderRadius: 4, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer"
                         }}>
                             {activeVessels.every(v => hiddenVessels.has(v.id)) ? "전체 표시" : "전체 숨기기"}
                         </button>
-                        <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                        <button onClick={onToggleLabels} style={{
+                            background: showLabels ? "#1d4ed8" : "#374151",
+                            color: showLabels ? "#fff" : "#9ca3af",
+                            border: showLabels ? "1px solid #3b82f6" : "1px dashed #4b5563",
+                            borderRadius: 4, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                            display: "flex", alignItems: "center", gap: 4,
+                        }}>
+                            💬 라벨
+                        </button>
+                        <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>
                             {activeVessels.filter(v => !hiddenVessels.has(v.id)).length}/{activeVessels.length} 표시중
                         </span>
                     </div>

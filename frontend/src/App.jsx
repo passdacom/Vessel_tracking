@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import LoginPage from "./components/LoginPage.jsx";
 import SharePanel from "./components/SharePanel.jsx";
 import Map from "./components/Map/index.jsx";
@@ -7,11 +7,14 @@ import AddVesselModal from "./components/AddVesselModal.jsx";
 import ManualPositionModal from "./components/ManualPositionModal.jsx";
 import GroupManageModal from "./components/GroupManageModal.jsx";
 import AdminDashboard from "./components/AdminDashboard.jsx";
+import LaneManager from "./components/ShippingLanes/LaneManager.jsx";
+import EtaPanel from "./components/EtaPanel.jsx";
 import SettingsModal from "./components/SettingsModal.jsx";
 import UserGuide from "./components/UserGuide.jsx";
 import { useWebSocket } from "./hooks/useWebSocket.js";
 import usePlayback from "./hooks/usePlayback.js";
 import PlaybackPanel from "./components/PlaybackPanel.jsx";
+import GlobalTimePanel from "./components/GlobalTimePanel.jsx";
 import ZoneSettingsPanel from "./components/ZoneSettingsPanel.jsx";
 
 function ReportTable({ vessels, positions }) {
@@ -105,6 +108,7 @@ function App() {
   const playback = usePlayback(playbackVesselId ? positions[playbackVesselId] : null);
 
   const handleStartPlayback = (vesselId) => {
+    setGlobalTime(null); // 시간 이동 모드 해제
     setPlaybackVesselId(vesselId);
     setPlaybackFollow(true);
     setSelectedVesselId(vesselId);
@@ -113,6 +117,32 @@ function App() {
   const handleStopPlayback = () => {
     playback.controls.stop();
     setPlaybackVesselId(null);
+  };
+
+  // ── 전체 선박 시간 이동 ──
+  const [globalTime, setGlobalTime] = useState(null); // Date | null
+
+  // globalTime이 설정된 경우 해당 시각 기준으로 각 선박의 위치 표시
+  const displayPositions = useMemo(() => {
+    if (!globalTime) return positions;
+    const result = {};
+    for (const [vesselId, posArray] of Object.entries(positions)) {
+      if (!posArray || posArray.length === 0) { result[vesselId] = []; continue; }
+      // posArray는 timestamp DESC(최신 순) 정렬
+      const before = posArray.filter(p => new Date(p.timestamp) <= globalTime);
+      if (before.length > 0) {
+        result[vesselId] = before; // globalTime 이전의 위치들 (track + 최신 마커)
+      } else {
+        // globalTime이 이 선박의 첫 데이터보다 앞인 경우 → 가장 오래된 위치로 고정
+        result[vesselId] = [posArray[posArray.length - 1]];
+      }
+    }
+    return result;
+  }, [positions, globalTime]);
+
+  const handleSetGlobalTime = (date) => {
+    setGlobalTime(date);
+    if (date && playbackVesselId) handleStopPlayback(); // 재생 중이면 중단
   };
 
   // 히스토리 가져오기 후 positions 새로고침
@@ -149,8 +179,18 @@ function App() {
   });
   const [accountName, setAccountName] = useState(() => localStorage.getItem("vessel_account") || "");
   const [accountRole, setAccountRole] = useState(() => localStorage.getItem("vessel_role") || "user");
-  const [adminView, setAdminView] = useState("dashboard"); // admin: "dashboard" | "map"
+  const [adminView, setAdminView] = useState("dashboard"); // admin: "dashboard" | "map" | "lane-manager"
   const [showSharePanel, setShowSharePanel] = useState(false);
+
+  // ── 항로 상태 ──
+  const [lanes, setLanes] = useState([]);
+  const [showLanes, setShowLanes] = useState(true);
+
+  // ── ETA 계산 상태 ──
+  const [etaMode, setEtaMode] = useState(false);      // 목적지 클릭 대기 중
+  const [etaVesselId, setEtaVesselId] = useState(null); // ETA 계산 대상 선박 ID
+  const [etaDestination, setEtaDestination] = useState(null); // { lat, lon }
+  const [etaResult, setEtaResult] = useState(null);
 
   const handleLogin = (pw, account, role, token) => {
     if (token) {
@@ -182,9 +222,11 @@ function App() {
     setAccountRole("user");
     setIsAuthed(false);
   };
+
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
   const [showLabels, setShowLabels] = useState(() => {
-    return localStorage.getItem("vessel_show_labels") !== "false";
+    const stored = localStorage.getItem("vessel_show_labels");
+    return stored === null ? true : stored === "true"; // 기본값 true
   });
   const handleToggleLabels = () => {
     setShowLabels(prev => {
@@ -400,6 +442,47 @@ function App() {
     return () => clearInterval(id);
   }, [apiFetch]);
 
+  // ── 항로 데이터 로딩 ───────────────────────────────────────────────────────
+  const fetchLanes = useCallback(async () => {
+    try {
+      const res = await apiFetch("/lanes");
+      if (res.ok) setLanes(await res.json());
+    } catch (_) {}
+  }, [apiFetch]);
+
+  useEffect(() => {
+    if (isAuthed) fetchLanes();
+  }, [isAuthed, fetchLanes]);
+
+  // ── ETA 핸들러 ──────────────────────────────────────────────────────────────
+  const handleStartEta = useCallback((vesselId) => {
+    setEtaVesselId(vesselId);
+    setEtaDestination(null);
+    setEtaResult(null);
+    setEtaMode(true);
+    setSelectedVesselId(vesselId);
+  }, []);
+
+  const handleDestinationPick = useCallback((dest) => {
+    setEtaDestination(dest);
+    setEtaMode(false);
+  }, []);
+
+  // ETA 계산: EtaPanel 내부에서 수행 (onResultChange 콜백으로 전달받음)
+
+  const handleCloseEta = useCallback(() => {
+    setEtaMode(false);
+    setEtaVesselId(null);
+    setEtaDestination(null);
+    setEtaResult(null);
+  }, []);
+
+  const handleClearEtaDest = useCallback(() => {
+    setEtaDestination(null);
+    setEtaResult(null);
+    setEtaMode(true);
+  }, []);
+
   const handleAddVessel = async (mmsi, alias, color, companyType) => {
     const res = await apiFetch("/vessels", { method: "POST", body: JSON.stringify({ mmsi, alias, color, companyType }) });
     if (res.ok) {
@@ -474,6 +557,17 @@ function App() {
 
   if (!isAuthed) return <LoginPage onLogin={handleLogin} />;
 
+  // Admin 계정 — 항로 관리
+  if (accountRole === "admin" && adminView === "lane-manager") {
+    return (
+      <LaneManager
+        apiFetch={apiFetch}
+        onClose={() => setAdminView("dashboard")}
+        onLaneSaved={() => fetchLanes()}
+      />
+    );
+  }
+
   // Admin 계정 — 기본은 대시보드, 지도 전환 가능
   if (accountRole === "admin" && adminView === "dashboard") {
     return (
@@ -481,6 +575,7 @@ function App() {
         apiFetch={apiFetch}
         onLogout={handleLogout}
         onSwitchToMap={() => setAdminView("map")}
+        onOpenLaneManager={() => setAdminView("lane-manager")}
       />
     );
   }
@@ -534,6 +629,7 @@ function App() {
             onSelectPort={handleSelectPort}
             onStartPlayback={handleStartPlayback}
             onHistoryFetched={handleHistoryFetched}
+            onStartEta={handleStartEta}
             sidebarWidth={sidebarWidth}
           />
           {/* 리사이즈 핸들 (데스크탑만) */}
@@ -565,9 +661,63 @@ function App() {
             ⬛ 대시보드
           </button>
         )}
+
+        {/* 항로 토글 버튼 */}
+        {lanes.length > 0 && (
+          <button
+            onClick={() => setShowLanes((v) => !v)}
+            className={`absolute bottom-8 right-3 z-[900] text-xs px-2.5 py-1.5 rounded-lg shadow-lg flex items-center gap-1.5 transition print:hidden ${
+              showLanes
+                ? "bg-amber-700/90 hover:bg-amber-600 text-amber-100"
+                : "bg-gray-800/90 hover:bg-gray-700 text-gray-400"
+            }`}
+            title={showLanes ? "항로 숨기기" : "항로 보기"}
+          >
+            🛣 {showLanes ? "항로 표시 중" : "항로 숨김"}
+          </button>
+        )}
+
+        {/* ETA 모드 힌트 */}
+        {etaMode && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[900]">
+            <div className="bg-gray-900/90 text-amber-300 text-sm px-4 py-2 rounded-xl shadow-xl border border-amber-600/50">
+              🎯 지도를 클릭하여 목적지를 설정하세요
+            </div>
+          </div>
+        )}
+
+        {/* ETA 패널 — 우상단 고정, 시간이동 버튼과 겹치지 않음 */}
+        {etaVesselId && (
+          <div
+            className="absolute z-[900] print:hidden"
+            style={{
+              top: accountRole === "admin" ? "3.75rem" : "0.75rem",
+              right: "0.75rem",
+              maxWidth: 320,
+              minWidth: 270,
+            }}
+          >
+            <EtaPanel
+              vessel={vessels.find((v) => v.id === etaVesselId)}
+              position={positions[etaVesselId]?.[0]}
+              lanes={lanes}
+              destination={etaDestination}
+              onClose={handleCloseEta}
+              onClearDest={handleClearEtaDest}
+              onResultChange={setEtaResult}
+              apiFetch={apiFetch}
+              onPortPick={handleDestinationPick}
+            />
+          </div>
+        )}
+
         <Map
-          vessels={vessels.filter(v => v.active !== false && !hiddenVessels.has(v.id))}
-          positions={positions}
+          vessels={
+            etaMode
+              ? vessels.filter(v => v.active !== false && !hiddenVessels.has(v.id) && v.id === etaVesselId)
+              : vessels.filter(v => v.active !== false && !hiddenVessels.has(v.id))
+          }
+          positions={displayPositions}
           selectedVesselId={selectedVesselId}
           panTrigger={panTrigger}
           onSelectVessel={handleSelectVessel}
@@ -579,8 +729,22 @@ function App() {
           playback={playback}
           playbackFollow={playbackFollow}
           showLabels={showLabels}
+          lanes={lanes}
+          showLanes={showLanes}
+          etaMode={etaMode}
+          onDestinationPick={handleDestinationPick}
+          etaResult={etaResult}
+          etaDestination={etaDestination}
+          etaVesselPos={etaVesselId ? positions[etaVesselId]?.[0] : null}
+          onStartEta={handleStartEta}
         />
         <ReportTable vessels={vessels.filter(v => v.active !== false)} positions={positions} />
+        <GlobalTimePanel
+          globalTime={globalTime}
+          onSetGlobalTime={handleSetGlobalTime}
+          positions={positions}
+          vessels={vessels.filter(v => v.active !== false)}
+        />
         {playbackVesselId && (
           <PlaybackPanel
             vessel={vessels.find((v) => v.id === playbackVesselId)}

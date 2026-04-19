@@ -8,6 +8,7 @@ import vesselRoutes from "./routes/vessels.js";
 import sharesRoutes from "./routes/shares.js";
 import portRoutes from "./routes/ports.js";
 import adminRoutes from "./routes/admin.js";
+import laneRoutes from "./routes/lanes.js";
 import { createWsServer } from "./services/wsServer.js";
 import { createDatalasticPoller } from "./services/datalasticPoller.js";
 import { startCleanupJob } from "./services/cleanup.js";
@@ -38,7 +39,7 @@ app.use(
     credentials: false,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
 // ── Rate Limiters ─────────────────────────────────────────────────────────────
 const authLimiter = rateLimit({
@@ -129,6 +130,7 @@ app.use("/api/vessels", vesselRoutes(prisma));
 app.use("/api/shares", sharesRoutes(prisma));
 app.use("/api/ports", portRoutes(prisma));
 app.use("/api/admin", adminRoutes(prisma));
+app.use("/api/lanes", laneRoutes(prisma));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 // ── 수동 강제 업데이트 (admin 세션 또는 admin 비밀번호) ────────────────────────

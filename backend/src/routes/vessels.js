@@ -131,7 +131,7 @@ export default function vesselRoutes(prisma) {
       const vessel = await checkVesselAccess(prisma, id, req);
       if (!vessel) return res.status(404).json({ error: "Vessel not found" });
 
-      const hours = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 720);
+      const hours = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 2160);
       const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
       let positions = await prisma.position.findMany({
@@ -148,10 +148,37 @@ export default function vesselRoutes(prisma) {
         if (latest) positions = [latest];
       }
 
-      // 최신 위치에 현재 HRA 구역 정보 주입 (페이지 로드 시 배지 즉시 표시)
+      // 최신 위치에 현재 HRA 구역 정보 + 가장 최근 ETA/목적지 주입
       if (positions.length > 0) {
         const currentZones = geofenceChecker.getCurrentZones(id);
-        positions[0] = { ...positions[0], currentZones };
+
+        // 1차: 현재 조회 범위(trackHours 이내) 에서 찾기
+        let latestEta = positions[0].eta ?? (positions.find(p => p.eta !== null)?.eta ?? null);
+        let latestDest = positions[0].destination ?? (positions.find(p => p.destination)?.destination ?? null);
+
+        // 2차: 범위 내에 없으면 전체 히스토리에서 가장 최근 비-null 값 조회
+        // (AIS Type 5 메시지는 Type 1/2/3 위치보고보다 훨씬 드물게 수신되므로
+        //  trackHours 범위를 벗어난 과거 데이터에만 존재할 수 있음)
+        if (latestEta == null || latestDest == null) {
+          const histPos = await prisma.position.findFirst({
+            where: {
+              vesselId: id,
+              suspicious: false,
+              OR: [
+                ...(latestEta == null  ? [{ eta:         { not: null } }] : []),
+                ...(latestDest == null ? [{ destination: { not: null } }] : []),
+              ],
+            },
+            orderBy: { timestamp: "desc" },
+            select: { eta: true, destination: true },
+          });
+          if (histPos) {
+            if (latestEta  == null) latestEta  = histPos.eta         ?? null;
+            if (latestDest == null) latestDest = histPos.destination  ?? null;
+          }
+        }
+
+        positions[0] = { ...positions[0], currentZones, eta: latestEta, destination: latestDest };
       }
 
       res.json(positions);

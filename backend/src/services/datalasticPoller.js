@@ -55,6 +55,16 @@ export function apiCall(endpoint, params) {
   const url = `${API_BASE}/${endpoint}?${qs}`;
   return new Promise((resolve) => {
     https.get(url, (res) => {
+      // 응답 헤더에서 크레딧 잔량 추출
+      const remaining = parseInt(res.headers["x-requestlimit-remaining"]);
+      const limit     = parseInt(res.headers["x-requestlimit-limit"]);
+      if (!isNaN(remaining)) {
+        apiCall._lastRemaining   = remaining;
+        apiCall._lastLimit       = isNaN(limit) ? null : limit;
+        apiCall._lastRemainingAt = new Date().toISOString();
+        logger.info(`[Datalastic] 💳 크레딧 잔량: ${remaining.toLocaleString()} / ${isNaN(limit) ? "?" : limit.toLocaleString()}`);
+      }
+
       let data = "";
       res.on("data", (c) => (data += c));
       res.on("end", () => {
@@ -65,6 +75,15 @@ export function apiCall(endpoint, params) {
       resolve(null);
     });
   });
+}
+
+/** 마지막으로 확인된 크레딧 잔량 반환 */
+export function getLastCreditRemaining() {
+  return {
+    remaining:   apiCall._lastRemaining   ?? null,
+    limit:       apiCall._lastLimit       ?? null,
+    checkedAt:   apiCall._lastRemainingAt ?? null,
+  };
 }
 
 /**
@@ -132,7 +151,7 @@ async function processVesselData(prisma, vessels, d, logFn, onPosition, onZoneEv
       const currentZones = geofenceChecker.getCurrentZones(v.id);
 
       log(`[Datalastic] ✅ ${v.mmsi} (${d.name || v.alias || v.account}) | ${lat.toFixed(4)},${lon.toFixed(4)} | SOG:${sog} | Dest:${destination}`);
-      onPosition({
+      if (onPosition) onPosition({
         vesselId: v.id,
         mmsi: v.mmsi,
         name: d.name || v.name || v.alias,
@@ -206,6 +225,50 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
     }
   }
 
+  // ── vessel_history 응답 처리 (여러 포인트 → DB 저장, 최신 1개만 브로드캐스트) ──
+  async function processHistory(vesselGroup, histData, logFn) {
+    const log = logFn || (() => {});
+    const positions = histData.positions || [];
+    if (positions.length === 0) return;
+
+    // 오래된 순서로 처리해야 스푸핑 체인이 정확함
+    const sorted = [...positions].sort((a, b) => a.last_position_epoch - b.last_position_epoch);
+
+    let savedCount = 0, skippedCount = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const pos = sorted[i];
+      const isLatest = i === sorted.length - 1;
+
+      // vessel_history 응답 필드를 processVesselData가 기대하는 형태로 통합
+      const d = {
+        lat: pos.lat,
+        lon: pos.lon,
+        speed: pos.speed,
+        course: pos.course,
+        heading: pos.heading,
+        destination: pos.destination,
+        last_position_epoch: pos.last_position_epoch,
+        navigation_status: pos.navigation_status || null,
+        eta_UTC: pos.eta_UTC || null,
+        // vessel 메타데이터
+        name: histData.name,
+        mmsi: histData.mmsi,
+        imo: histData.imo,
+      };
+
+      const prevSavedCount = savedCount;
+      await processVesselData(
+        prisma, vesselGroup, d,
+        isLatest ? log : () => {},       // 히스토리 개별 로그 억제, 최신만 출력
+        isLatest ? onPosition : null,    // 최신 포인트만 WebSocket 브로드캐스트
+        isLatest ? onZoneEvent : null,   // 최신 포인트만 지오펜스 검사
+      );
+      savedCount++;
+    }
+
+    log(`[Datalastic] 📦 ${histData.name || histData.mmsi}: ${sorted.length}개 포인트 처리 완료`);
+  }
+
   // ── 위치 폴링 (스케줄) ──
   async function pollPositions() {
     const allVessels = await prisma.vessel.findMany({ where: { active: true } });
@@ -219,19 +282,19 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
     }
 
     const mmsiEntries = [...mmsiGroups.entries()];
-    logger.info(`[Datalastic] 📡 Polling ${mmsiEntries.length} unique MMSI(s) / ${allVessels.length} vessel(s) at ${new Date().toISOString()}`);
+    logger.info(`[Datalastic] 📡 Polling ${mmsiEntries.length} unique MMSI(s) / ${allVessels.length} vessel(s) via vessel_history at ${new Date().toISOString()}`);
 
     await parallelLimit(mmsiEntries, async ([mmsi, vesselGroup]) => {
       const primary = vesselGroup[0];
       const params = primary.imo ? { imo: primary.imo } : { mmsi: primary.mmsi };
-      const res = await apiCall("vessel", params);
-      try { await prisma.apiUsage.create({ data: { endpoint: "vessel", credits: 1, account: null } }); } catch {}
+      const res = await apiCall("vessel_history", { ...params, days: 1 });
+      try { await prisma.apiUsage.create({ data: { endpoint: "vessel_history", credits: 1, account: null } }); } catch {}
       if (!res?.data) {
         logger.warn(`[Datalastic] ⚠ No data for ${primary.imo ? "IMO " + primary.imo : "MMSI " + mmsi}`);
         return;
       }
-      await processVesselData(prisma, vesselGroup, res.data, null, onPosition, onZoneEvent);
-    }, 5); // Datalastic rate limit 대비 최대 5개 동시 요청
+      await processHistory(vesselGroup, res.data, null);
+    }, 5);
   }
 
   // cron 스케줄 시작 헬퍼
@@ -274,14 +337,15 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
         log(`⏩ 필터 적용: ${targetGroups.length}개 MMSI 대상`);
       }
 
-      log(`[Datalastic] 📡 수동 폴링 시작 - ${targetGroups.length}개 MMSI`);
+      log(`[Datalastic] 📡 수동 폴링 시작 - ${targetGroups.length}개 MMSI (vessel_history days=1)`);
 
       let updatedCount = 0, skippedCount = 0;
 
       for (const [mmsi, vesselGroup] of targetGroups) {
         const primary = vesselGroup[0];
         const params = primary.imo ? { imo: primary.imo } : { mmsi: primary.mmsi };
-        const res = await apiCall("vessel", params);
+        const res = await apiCall("vessel_history", { ...params, days: 1 });
+        try { await prisma.apiUsage.create({ data: { endpoint: "vessel_history", credits: 1, account: null } }); } catch {}
 
         if (!res?.data) {
           log(`[Datalastic] ⚠ 데이터 없음: ${primary.imo ? "IMO " + primary.imo : "MMSI " + mmsi} (${primary.name || primary.alias || ""})`);
@@ -289,13 +353,12 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
           continue;
         }
 
-        const d = res.data;
-        const lat = parseFloat(d.lat);
-        const lon = parseFloat(d.lon);
-        if (isNaN(lat) || isNaN(lon)) { skippedCount++; continue; }  // P0 버그 수정
+        const histData = res.data;
+        const positions = histData.positions || [];
+        if (positions.length === 0) { skippedCount++; continue; }
 
-        await processVesselData(prisma, vesselGroup, d, log, onPosition, onZoneEvent);
-        log(`[Datalastic] ✅ 갱신: ${d.name || primary.alias || mmsi} | SOG:${d.speed} | 위치:${lat.toFixed(3)},${lon.toFixed(3)}`);
+        await processHistory(vesselGroup, histData, log);
+        log(`[Datalastic] ✅ 갱신: ${histData.name || primary.alias || mmsi} | ${positions.length}개 포인트`);
         updatedCount++;
       }
 

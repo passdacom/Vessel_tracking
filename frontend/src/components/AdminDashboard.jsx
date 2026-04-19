@@ -64,7 +64,7 @@ function calcApiPrediction(overview) {
   };
 }
 
-export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
+export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap, onOpenLaneManager }) {
   const [overview, setOverview] = useState(null);
   const [vessels, setVessels] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -99,6 +99,21 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
   const [zoneEventsLoading, setZoneEventsLoading] = useState(false);
   const [zoneEventsFilter, setZoneEventsFilter] = useState(""); // "" | "entry" | "exit"
   const [zoneEventsTotal, setZoneEventsTotal] = useState(0);
+
+  // ── Datalastic 실제 크레딧 잔량 ──
+  const [credits, setCredits] = useState(null);
+  const [creditsRefreshing, setCreditsRefreshing] = useState(false);
+
+  const fetchCredits = useCallback(async () => {
+    setCreditsRefreshing(true);
+    try {
+      const res = await apiFetch("/admin/credits");
+      if (res.ok) setCredits(await res.json());
+    } catch (e) {
+      console.error("Credits fetch error:", e);
+    }
+    setCreditsRefreshing(false);
+  }, [apiFetch]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -138,7 +153,7 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
     setZoneEventsLoading(false);
   }, [apiFetch]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { fetchData(); fetchCredits(); }, [fetchData, fetchCredits]);
   useEffect(() => { fetchZoneEvents(zoneEventsFilter); }, [fetchZoneEvents, zoneEventsFilter]);
 
   const handleShareVessel = async (vesselId, targetAccount) => {
@@ -330,6 +345,13 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={onOpenLaneManager}
+              className="px-3 py-1.5 bg-amber-700 hover:bg-amber-600 text-sm rounded-lg transition flex items-center gap-1.5"
+              title="표준 항로 관리"
+            >
+              🛣 항로 관리
+            </button>
+            <button
               onClick={onSwitchToMap}
               className="px-3 py-1.5 bg-blue-700 hover:bg-blue-600 text-sm rounded-lg transition flex items-center gap-1.5"
               title="지도 뷰로 전환"
@@ -367,13 +389,34 @@ export default function AdminDashboard({ apiFetch, onLogout, onSwitchToMap }) {
               </div>
             </div>
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-              <div className="text-xs text-gray-500 mb-1">잔여 크레딧</div>
-              <div className={`text-2xl font-bold ${overview.api.monthlyRemaining < 2000 ? "text-red-400" : "text-green-400"}`}>
-                {overview.api.monthlyRemaining.toLocaleString()}
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-xs text-gray-500">Datalastic 잔여 크레딧</div>
+                <button
+                  onClick={fetchCredits}
+                  disabled={creditsRefreshing}
+                  className="text-[10px] text-gray-500 hover:text-gray-300 disabled:opacity-40 transition"
+                  title="잔량 새로고침"
+                >
+                  {creditsRefreshing ? "..." : "↻"}
+                </button>
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                시스템(폴링): {overview.api.systemUsed.toLocaleString()}
-              </div>
+              {credits && credits.remaining !== null ? (
+                <>
+                  <div className={`text-2xl font-bold ${credits.remaining < 2000 ? "text-red-400" : "text-green-400"}`}>
+                    {credits.remaining.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    / {credits.limit ? credits.limit.toLocaleString() : "?"} 한도
+                  </div>
+                  {credits.checkedAt && (
+                    <div className="text-[10px] text-gray-600 mt-0.5">
+                      마지막 폴링: {formatDate(credits.checkedAt)}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-sm text-gray-600 mt-2">폴링 후 표시</div>
+              )}
             </div>
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
               <div className="text-xs text-gray-500 mb-1">총 선박 수</div>

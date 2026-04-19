@@ -204,3 +204,13 @@
   background: #6b7280;
   /* Tailwind gray-500 */
 }
+
+/* 항로 클릭 시 파란 focus 테두리 제거 */
+.leaflet-interactive:focus,
+.leaflet-interactive:active {
+  outline: none !important;
+}
+.leaflet-overlay-pane path:focus,
+.leaflet-overlay-pane path:active {
+  outline: none !important;
+}

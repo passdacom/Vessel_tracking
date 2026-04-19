@@ -55,6 +55,7 @@ export default function VesselCard({
     apiFetch,
     onStartPlayback,
     onHistoryFetched,
+    onStartEta,
 }) {
     const [editing, setEditing] = useState(false);
     const [alias, setAlias] = useState(vessel.alias || vessel.name || '');
@@ -312,8 +313,8 @@ export default function VesselCard({
                                 </div>
                             )}
 
-                            {/* ── 액션 버튼: 재생 / 히스토리 / 그룹 ── */}
-                            <div className="flex gap-1.5 pt-0.5">
+                            {/* ── 액션 버튼: 재생 / ETA / 히스토리 / 그룹 ── */}
+                            <div className="flex gap-1.5 pt-0.5 flex-wrap">
                                 <button
                                     onClick={(e) => { e.stopPropagation(); if (onStartPlayback) onStartPlayback(vessel.id); }}
                                     className="flex-1 py-1 bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white text-[11px] rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
@@ -321,6 +322,15 @@ export default function VesselCard({
                                 >
                                     ▶ 재생
                                 </button>
+                                {latestPosition && (
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); if (onStartEta) onStartEta(vessel.id); }}
+                                        className="flex-1 py-1 bg-gray-700 hover:bg-amber-700 text-gray-400 hover:text-amber-100 text-[11px] rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-amber-500"
+                                        title="지도에서 목적지를 클릭하여 거리/ETA를 계산합니다"
+                                    >
+                                        🧭 ETA
+                                    </button>
+                                )}
                                 <button
                                     onClick={(e) => { e.stopPropagation(); setShowHistory(v => !v); }}
                                     className={`flex-1 py-1 text-[11px] rounded transition flex items-center justify-center gap-1 border ${showHistory ? 'bg-indigo-700 border-indigo-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-white hover:border-indigo-500'}`}

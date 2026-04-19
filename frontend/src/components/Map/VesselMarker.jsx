@@ -77,7 +77,7 @@ function formatEta(eta) {
     );
 }
 
-export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24, labelDirection = 'top', showLabels = true }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24, labelDirection = 'top', showLabels = true, onStartEta }) {
     const rotation = position.heading ?? position.cog ?? 0;
 
     const isStale = Date.now() - new Date(position.timestamp) > trackHours * 60 * 60 * 1000;
@@ -245,6 +245,28 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
                             </tr>
                         </tbody>
                     </table>
+
+                    {/* ETA 계산 버튼 */}
+                    {onStartEta && (
+                      <div style={{ borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 7 }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onStartEta(vessel.id); }}
+                          style={{
+                            width: '100%',
+                            fontSize: 11,
+                            padding: '5px 0',
+                            borderRadius: 5,
+                            border: '1px solid #6366f1',
+                            background: '#eef2ff',
+                            color: '#4338ca',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                          }}
+                        >
+                          🧭 ETA / 거리 계산
+                        </button>
+                      </div>
+                    )}
 
                     {/* 강제 갱신 */}
                     <div style={{ borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 7 }}>

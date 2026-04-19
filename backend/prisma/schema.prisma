@@ -138,3 +138,18 @@ model SharedView {
   createdAt DateTime @default(now())
   expiresAt DateTime?
 }
+
+model ShippingLane {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  coordinates Json     // [[lon, lat], ...] GeoJSON 순서로 저장
+  color       String   @default("#f59e0b")
+  active      Boolean  @default(true)
+  createdBy   String   @default("admin")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active])
+  @@index([createdAt(sort: Desc)])
+}
