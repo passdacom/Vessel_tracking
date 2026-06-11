@@ -32,8 +32,9 @@ model Vessel {
   infoFetched  Boolean    @default(false)
   active       Boolean    @default(true)
   createdAt    DateTime   @default(now())
-  positions    Position[]
-  zoneEvents   ZoneEvent[]
+  positions      Position[]
+  zoneEvents     ZoneEvent[]
+  vesselAccounts VesselAccount[]
 
   @@unique([account, mmsi])
   @@index([account])
@@ -96,6 +97,22 @@ model Account {
   createdAt   DateTime @default(now())
 }
 
+// Legacy per-account vessel settings table retained to avoid data loss on db push.
+// Current app reads account/alias/color/companyType from Vessel directly.
+model VesselAccount {
+  id          Int      @id @default(autoincrement())
+  vesselId    Int
+  vessel      Vessel   @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  account     String
+  alias       String?
+  color       String   @default("#3b82f6")
+  companyType String   @default("자사간사")
+  createdAt   DateTime @default(now())
+
+  @@unique([vesselId, account])
+  @@index([account])
+}
+
 model SystemConfig {
   id        Int      @id @default(autoincrement())
   key       String   @unique
@@ -135,8 +152,11 @@ model SharedView {
   token     String   @unique
   label     String
   vesselIds String   // JSON array of vessel IDs e.g. "[3,4,5]"
+  createdBy String?
   createdAt DateTime @default(now())
   expiresAt DateTime?
+
+  @@index([createdBy])
 }
 
 model ShippingLane {

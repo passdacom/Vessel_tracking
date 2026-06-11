@@ -173,7 +173,9 @@ function EtaOverlay({ etaResult, vesselPos, destination }) {
     const snapVLatLon = [snapVCoords[1], snapVCoords[0]]; // [lon,lat] → [lat,lon]
     const snapDLatLon = [snapDCoords[1], snapDCoords[0]];
 
-    // 항로 구간 좌표 (etaResult에 segment 없으면 snap 두 점만 연결)
+    const overlaySegments = Array.isArray(etaResult.overlaySegments)
+        ? etaResult.overlaySegments.filter((segment) => Array.isArray(segment.coordinates) && segment.coordinates.length >= 2)
+        : [];
     const segmentPositions = etaResult.segmentCoords
         ? etaResult.segmentCoords.map(([lon, lat]) => [lat, lon])
         : [snapVLatLon, snapDLatLon];
@@ -186,10 +188,20 @@ function EtaOverlay({ etaResult, vesselPos, destination }) {
                 pathOptions={{ color: "#9ca3af", weight: 1.5, dashArray: "5 4", opacity: 0.75 }}
             />
             {/* 항로 구간 (강조) */}
-            <Polyline
-                positions={segmentPositions}
-                pathOptions={{ color: laneColor || "#f59e0b", weight: 3.5, opacity: 0.9 }}
-            />
+            {overlaySegments.length > 0 ? (
+                overlaySegments.map((segment, idx) => (
+                    <Polyline
+                        key={`${segment.laneId ?? "lane"}-${idx}`}
+                        positions={segment.coordinates.map(([lon, lat]) => [lat, lon])}
+                        pathOptions={{ color: segment.laneColor || laneColor || "#f59e0b", weight: 3.5, opacity: 0.9 }}
+                    />
+                ))
+            ) : (
+                <Polyline
+                    positions={segmentPositions}
+                    pathOptions={{ color: laneColor || "#f59e0b", weight: 3.5, opacity: 0.9 }}
+                />
+            )}
             {/* 항로 이탈점 → 목적지 (점선) */}
             <Polyline
                 positions={[snapDLatLon, destLatLon]}

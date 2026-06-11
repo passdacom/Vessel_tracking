@@ -13,13 +13,17 @@ function requireAdmin(req, res, next) {
 export default function sharesRoutes(prisma) {
   const router = express.Router();
 
-  // 관리자: 공유 링크 목록 조회
+  // 공유 링크 목록 조회
+  // - admin: 전체 링크 조회
+  // - user: 본인이 생성한 링크만 조회
+  // - legacy(createdBy null): admin만 관리 가능, 공개 조회는 계속 허용
   router.get("/", requireAdmin, async (req, res) => {
-    const shares = await prisma.sharedView.findMany({ orderBy: { createdAt: "desc" } });
+    const where = req.accountRole === "admin" ? {} : { createdBy: req.account };
+    const shares = await prisma.sharedView.findMany({ where, orderBy: { createdAt: "desc" } });
     res.json(shares.map(s => ({ ...s, vesselIds: JSON.parse(s.vesselIds) })));
   });
 
-  // 관리자: 공유 링크 생성
+  // 공유 링크 생성 (인증 사용자)
   router.post("/", requireAdmin, async (req, res) => {
     const { label, vesselIds } = req.body;
     if (!label || !vesselIds?.length) {
@@ -27,15 +31,20 @@ export default function sharesRoutes(prisma) {
     }
     const token = crypto.randomBytes(12).toString("base64url");
     const share = await prisma.sharedView.create({
-      data: { token, label, vesselIds: JSON.stringify(vesselIds) },
+      data: { token, label, vesselIds: JSON.stringify(vesselIds), createdBy: req.account },
     });
     res.json({ ...share, vesselIds: JSON.parse(share.vesselIds) });
   });
 
-  // 관리자: 공유 링크 삭제
+  // 공유 링크 삭제
+  // - admin: 전체 삭제 가능
+  // - user: 본인이 생성한 링크만 삭제 가능
   router.delete("/:token", requireAdmin, async (req, res) => {
     try {
-      const result = await prisma.sharedView.deleteMany({ where: { token: req.params.token } });
+      const where = req.accountRole === "admin"
+        ? { token: req.params.token }
+        : { token: req.params.token, createdBy: req.account };
+      const result = await prisma.sharedView.deleteMany({ where });
       if (result.count === 0) return res.status(404).json({ error: "Share not found" });
       res.json({ ok: true });
     } catch (e) {

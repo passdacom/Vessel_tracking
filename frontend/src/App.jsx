@@ -16,6 +16,7 @@ import usePlayback from "./hooks/usePlayback.js";
 import PlaybackPanel from "./components/PlaybackPanel.jsx";
 import GlobalTimePanel from "./components/GlobalTimePanel.jsx";
 import ZoneSettingsPanel from "./components/ZoneSettingsPanel.jsx";
+import { clearAuthStorage, createApiFetch, getStoredAuthToken } from "./authSession.js";
 
 function ReportTable({ vessels, positions }) {
   const now = new Date().toUTCString();
@@ -211,17 +212,12 @@ function App() {
     setAccountRole(role);
     setIsAuthed(true);
   };
-  const handleLogout = () => {
-    localStorage.removeItem("vessel_token");
-    localStorage.removeItem("vessel_token_expires");
-    localStorage.removeItem("vessel_auth");
-    localStorage.removeItem("vessel_auth_expires");
-    localStorage.removeItem("vessel_account");
-    localStorage.removeItem("vessel_role");
+  const handleLogout = useCallback(() => {
+    clearAuthStorage();
     setAccountName("");
     setAccountRole("user");
     setIsAuthed(false);
-  };
+  }, []);
 
   const [hiddenVessels, setHiddenVessels] = useState(new Set());
   const [showLabels, setShowLabels] = useState(() => {
@@ -340,20 +336,9 @@ function App() {
   const trackHoursRef = useRef(trackHours);
   trackHoursRef.current = trackHours;
 
-  const apiFetch = useCallback(
-    (path, options = {}) => {
-      // 세션 토큰 우선, 없으면 구 비밀번호 폴백
-      const authToken = localStorage.getItem("vessel_token") || localStorage.getItem("vessel_auth") || "";
-      return fetch(`/api${path}`, {
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${authToken}`,
-          ...options.headers,
-        },
-      });
-    },
-    []
+  const apiFetch = useMemo(
+    () => createApiFetch({ onUnauthorized: handleLogout }),
+    [handleLogout]
   );
 
   const loadPositions = useCallback(
@@ -391,8 +376,8 @@ function App() {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsHost = window.location.protocol === "https:" ? window.location.host : `${window.location.hostname}:3001`;
   // 세션 토큰 우선, 없으면 구 비밀번호 폴백 (WS URL에 평문 비밀번호 노출 방지)
-  const wsToken = localStorage.getItem("vessel_token") || localStorage.getItem("vessel_auth") || "";
-  const wsUrl = `${proto}//${wsHost}/ws?token=${encodeURIComponent(wsToken)}`;
+  const wsToken = getStoredAuthToken();
+  const wsUrl = isAuthed ? `${proto}//${wsHost}/ws?token=${encodeURIComponent(wsToken)}` : null;
 
   const dismissToast = useCallback((id) => {
     setZoneToasts((prev) => prev.filter((t) => t.id !== id));
@@ -424,7 +409,7 @@ function App() {
       setPositions((prev) => { const next = { ...prev }; delete next[msg.data.id]; return next; });
       if (selectedVesselId === msg.data.id) setSelectedVesselId(null);
     }
-  });
+  }, { onUnauthorized: handleLogout });
 
   useEffect(() => {
     const check = () => {

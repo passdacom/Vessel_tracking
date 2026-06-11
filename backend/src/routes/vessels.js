@@ -42,6 +42,28 @@ async function checkVesselAccess(prisma, vesselId, req) {
   return vessel;
 }
 
+/** 히스토리 API는 크레딧을 소모하므로 admin 세션 또는 admin 비밀번호가 필요 */
+async function requireHistoryPassword(prisma, req, res) {
+  if (req.accountRole === "admin") return true;
+
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  if (!password) {
+    res.status(401).json({ error: "히스토리 조회 비밀번호를 입력해주세요." });
+    return false;
+  }
+
+  const adminAccount = await prisma.account.findUnique({
+    where: { name: "admin" },
+    select: { password: true },
+  });
+  if (!adminAccount || adminAccount.password !== password) {
+    res.status(401).json({ error: "히스토리 조회 비밀번호가 올바르지 않습니다." });
+    return false;
+  }
+
+  return true;
+}
+
 export default function vesselRoutes(prisma) {
   const router = Router();
 
@@ -313,23 +335,32 @@ export default function vesselRoutes(prisma) {
 
       const days = Math.min(Math.max(parseInt(req.body.days) || 7, 1), 30);
 
+      if (!(await requireHistoryPassword(prisma, req, res))) return;
+
       if (!vessel.imo && !vessel.mmsi) {
         return res.status(400).json({ error: "선박의 IMO 또는 MMSI가 필요합니다" });
       }
 
       const params = vessel.imo ? { imo: vessel.imo, days } : { mmsi: vessel.mmsi, days };
-      const result = await apiCall("vessel_hist", params);
-      await logApiUsage(prisma, "vessel_hist", days, req.account);
+      const result = await apiCall("vessel_history", params);
+      await logApiUsage(prisma, "vessel_history", days, req.account);
 
       if (!result || (!result.data && !Array.isArray(result))) {
         const isNotFound = result?.meta?.success === false;
         const errMsg = isNotFound
-          ? "vessel_hist API를 사용할 수 없습니다 (현재 구독 플랜 미포함). 관리자에게 문의하세요."
+          ? "vessel_history API를 사용할 수 없습니다 (현재 구독 플랜 미포함). 관리자에게 문의하세요."
           : "Datalastic API 응답 없음";
         return res.status(502).json({ error: errMsg, credits_used: 0 });
       }
 
-      const records = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
+      const payload = result?.data?.positions;
+      const records = Array.isArray(payload)
+        ? payload
+        : Array.isArray(result)
+          ? result
+          : Array.isArray(result?.positions)
+            ? result.positions
+            : [];
       if (records.length === 0) return res.json({ fetched: 0, stored: 0, credits_used: days });
 
       let stored = 0;

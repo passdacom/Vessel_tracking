@@ -258,7 +258,7 @@ export default function LaneEditor({ apiFetch, initialLane, onSave, onCancel }) 
         },
       }));
     } catch (e) { setError(e.message || "항적 가져오기 실패"); }
-    setImporting(false);
+    finally { setImporting(false); }
   };
 
   // ── 웨이포인트 추가/삭제 ──────────────────────────────────────────────────
@@ -406,10 +406,11 @@ export default function LaneEditor({ apiFetch, initialLane, onSave, onCancel }) 
       const saved = await res.json();
       onSave(saved);
     } catch (e) { setError(e.message); }
-    setSaving(false);
+    finally { setSaving(false); }
   };
 
   const refTrackCount = Object.keys(refTracks).length;
+  const moveWpIcon = useMemo(() => makeWpIcon(color, "move"), [color]);
 
   // ── 렌더링 ────────────────────────────────────────────────────────────────
   return (
@@ -776,10 +777,10 @@ export default function LaneEditor({ apiFetch, initialLane, onSave, onCancel }) 
             {waypoints.map((wp, idx) =>
               mode === "move" ? (
                 <Marker
-                  key={`wp-${idx}`}
+                  key={`wp-${wp[0].toFixed(5)}-${wp[1].toFixed(5)}`}
                   position={wp}
                   draggable
-                  icon={makeWpIcon(color, "move")}
+                  icon={moveWpIcon}
                   eventHandlers={{
                     dragstart: handleDragStart,
                     dragend: (e) => handleDragEnd(idx, e),
@@ -791,7 +792,7 @@ export default function LaneEditor({ apiFetch, initialLane, onSave, onCancel }) 
                 </Marker>
               ) : (
                 <CircleMarker
-                  key={`wp-${idx}`}
+                  key={`wp-${wp[0].toFixed(5)}-${wp[1].toFixed(5)}`}
                   center={wp}
                   radius={mode === "delete" ? 9 : mode === "select" ? 8 : 6}
                   pathOptions={{

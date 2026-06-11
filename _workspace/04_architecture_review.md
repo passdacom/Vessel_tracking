@@ -1,623 +1,407 @@
-# 아키텍처 리뷰 — Vessel Tracking App
+# 아키텍처 리뷰 — ShippingLanes 컴포넌트 (LaneEditor / LaneList / LaneManager) + lanes.js
 
-## 리뷰 개요
-
-- **아키텍처 건강 수준**: 🟡 개선 필요
-- **아키텍처 패턴**: Layered (Express Routes → Services → Prisma ORM) + React 단일 컴포넌트 트리
-- **총 발견 수**: 🔴 4 / 🟡 6 / 🟢 3
+리뷰 대상: LaneEditor.jsx, LaneList.jsx, LaneManager.jsx, lanes.js, App.jsx (관련 부분)
+리뷰 기준일: 2026-04-19
 
 ---
 
-## 구조적 발견 사항
+## 요약
 
-### 🔴 구조적 문제
-
-#### 1. `Vessel.mmsi @unique` — 다계정 선박 공유 불가 [데이터 모델 / DIP 위반]
-
-**문제**: `schema.prisma`의 `Vessel` 모델에 `mmsi String @unique` 제약이 있다. 한 계정이 MMSI `123456789`를 등록하면 다른 계정은 동일 선박을 등록할 수 없다. `vessels.js` POST 라우트에서 P2002 에러로 409를 반환하는 코드가 이를 증명한다. 현재 `account` 필드가 `Vessel`에 직접 박혀 있어 "선박은 한 계정에만 속한다"는 암묵적 가정이 스키마에 고정되어 있다.
-
-**영향**: 새 계정을 추가할 때마다 이미 추적 중인 선박을 재등록할 수 없다. KB가 등록한 선박을 KDGC도 보고 싶다면 현재 구조로는 불가능하다. `datalasticPoller.js`는 `prisma.vessel.findMany({ where: { active: true } })`로 전체 선박을 폴링하므로, 중복 등록이 허용된다면 동일 MMSI를 두 번 API 호출하는 문제도 발생한다.
-
-**리팩토링 제안 — 옵션 A: 복합 unique (최소 변경)**
-
-```
-// 현재
-model Vessel {
-  mmsi    String @unique
-  account String @default("kb")
-}
-
-// 변경 후: (account, mmsi) 복합 unique
-model Vessel {
-  mmsi    String
-  account String @default("kb")
-  @@unique([account, mmsi])
-}
-```
-
-이 방식은 마이그레이션이 단순하고 폴링 중복 방지 로직을 폴러에서 처리해야 한다는 점에서 현재 구조에 가장 잘 맞는다. 폴러는 `mmsi`로 중복 제거한 유니크 목록만 API 호출하면 된다.
-
-**리팩토링 제안 — 옵션 B: VesselAccount 중간 테이블 (장기 권장)**
-
-```
-model Vessel {
-  id           Int              @id @default(autoincrement())
-  mmsi         String           @unique   // 선박 자체는 글로벌 unique 유지
-  name         String?
-  // ... 선박 물리 정보 필드들
-  accounts     VesselAccount[]
-  positions    Position[]
-  zoneEvents   ZoneEvent[]
-}
-
-model VesselAccount {
-  id          Int     @id @default(autoincrement())
-  vesselId    Int
-  vessel      Vessel  @relation(fields: [vesselId], references: [id], onDelete: Cascade)
-  account     String
-  alias       String?
-  color       String  @default("#3b82f6")
-  companyType String  @default("자사간사")
-  active      Boolean @default(true)
-  createdAt   DateTime @default(now())
-  @@unique([vesselId, account])
-  @@index([account])
-}
-```
-
-이 구조에서 선박 물리 정보(IMO, 톤수, 제원 등)는 `Vessel`에 한 번만 저장되고, 계정별 표시 설정(alias, color, companyType, active)은 `VesselAccount`에 저장된다. 폴러는 전체 `Vessel`에서 active인 것을 MMSI 기준으로 한 번만 호출하고, 결과를 해당 선박을 구독하는 모든 계정에 브로드캐스트한다.
-
-**단계**:
-1. 스키마 변경 + 마이그레이션 (옵션 A는 1단계로 완료 가능)
-2. 폴러의 `pollPositions`에 MMSI dedup 로직 추가
-3. `vessels.js` POST에서 P2002 처리 방식 변경 (옵션 B의 경우 이미 등록된 선박을 계정에 연결하는 로직)
-4. `wsServer.broadcastToAccount`를 VesselAccount 기반으로 확장
-5. 프론트엔드 `vessel_removed` 이벤트: 다른 계정이 아직 사용 중인지 확인
+| 구분 | 건수 |
+|------|------|
+| 🔴 즉시 수정 필요 | 3 |
+| 🟡 개선 권장 | 5 |
+| 🟢 잘 된 점 | 4 |
 
 ---
 
-#### 2. `App.jsx` God Component — SRP 위반 [프론트엔드 아키텍처]
+## 🔴 즉시 수정 필요
 
-**문제**: `App.jsx`는 609줄로 다음 책임을 모두 가지고 있다:
-- 인증 상태 관리 및 localStorage 조작 (handleLogin, handleLogout, isAuthed 등 약 30줄)
-- 선박 CRUD 비즈니스 로직 (handleAddVessel, handleDeleteVessel, handleArchiveVessel, handleRestoreVessel, handleUpdateVessel — 약 70줄)
-- 그룹 관리 로직 (handleAddCustomGroup, handleRenameGroup, handleDeleteGroup — 약 50줄)
-- 위치 데이터 로드 및 WebSocket 상태 동기화 (loadPositions, useWebSocket 콜백 — 약 70줄)
-- UI 레이아웃 및 모달 오케스트레이션 (showAddModal, showSharePanel, showManualModal 등 8개 boolean 상태)
-- 인쇄용 ReportTable 컴포넌트 정의 (65줄)
-- ZoneToast 컴포넌트 정의 (22줄)
-- 사이드바 리사이즈 핸들러 로직
+### 1. lanes 데이터가 App.jsx 상태에 없음 — 메인 지도에 항로 표시 불가
 
-**영향**: 어떤 기능을 수정해도 App.jsx를 열어야 한다. 새 모달을 추가할 때마다 boolean 상태 1개, 핸들러 1-2개, JSX 조건 렌더링 1개씩 App.jsx가 커진다. 테스트 작성 시 전체 App 트리를 마운트해야 한다.
+**위치**: App.jsx 전체 / Map/index.jsx
 
-**리팩토링 제안**:
+**문제**: `LaneManager`는 `adminView === "lane-manager"` 조건에서 App 전체를 대체(full-page 렌더)하는 방식으로 마운트된다. `lanes` 상태는 App.jsx에 존재하지 않는다. 결과적으로 메인 지도(`<Map>`)에 항로를 표시하려면 구조적 변경이 필요하다.
 
-```
-frontend/src/
-├── contexts/
-│   └── AuthContext.jsx        // isAuthed, accountName, accountRole, handleLogin, handleLogout
-├── hooks/
-│   ├── useAuth.js             // localStorage 읽기/쓰기 캡슐화
-│   ├── useVessels.js          // vessels, positions, loadPositions, CRUD 핸들러
-│   ├── useGroups.js           // customGroups, handleAddCustomGroup, handleRenameGroup
-│   └── useWebSocket.js        // (이미 존재, 유지)
-├── components/
-│   ├── App.jsx                // 레이아웃 조합만 (100줄 이하 목표)
-│   ├── Map/                   // 현행 유지
-│   ├── Sidebar/               // 현행 유지
-│   └── print/
-│       └── ReportTable.jsx    // 인쇄용 컴포넌트 분리
+```jsx
+// App.jsx 현재 — lanes 상태 없음
+const [vessels, setVessels] = useState([]);
+const [positions, setPositions] = useState({});
+// lanes 없음 → <Map>에 전달 불가
 ```
 
-핵심은 `useAuth`와 `useVessels` 두 커스텀 훅을 만드는 것이다. `useAuth`는 localStorage 키 이름을 내부에서만 알고, `useVessels`는 apiFetch를 받아 선박 상태와 CRUD를 캡슐화한다.
+**영향**: 현재 ShippingLane 기능은 admin 전용 에디터 단독으로만 존재하고, 일반 사용자 지도(Map 컴포넌트)에는 항로가 전혀 표시되지 않는다. ETA 계산, 항로 기반 거리 계산 등 다음 단계 기능은 모두 lanes 데이터가 Map 레이어에 있어야 동작한다.
 
-**단계**:
-1. `ReportTable`과 `ZoneToast`를 별도 파일로 분리 (영향 없는 단순 추출)
-2. `useAuth.js` 훅 작성 — localStorage 접근을 한 곳으로 모음
-3. `useVessels.js` 훅 작성 — vessels/positions 상태와 핸들러 이동
-4. App.jsx를 조합 레이어로 축소
+**수정 방향**:
+
+```jsx
+// App.jsx에 lanes 상태 추가
+const [lanes, setLanes] = useState([]);
+
+useEffect(() => {
+  if (!isAuthed) return;
+  apiFetch("/lanes")           // active=true만 반환 (기본)
+    .then(r => r.ok ? r.json() : [])
+    .then(setLanes);
+}, [isAuthed, apiFetch]);
+
+// Map 컴포넌트에 전달
+<Map ... lanes={lanes} />
+```
+
+`GET /api/lanes`는 이미 모든 인증 사용자에게 허용되므로 백엔드 변경 없이 즉시 적용 가능하다.
 
 ---
 
-#### 3. `index.js` 서비스 하드 결합 + `app.locals` DI — DIP 위반 [서비스 레이어]
+### 2. handleSaved()가 저장된 항로 데이터를 버림 — UX 흐름 단절
 
-**문제**: `index.js`에서 `datalasticPoller`, `wsServer`, `geofenceChecker`가 직접 인스턴스화되어 서로의 콜백으로 결합되어 있다. `vessels.js` 라우트는 `req.app.locals.wsServer`와 `req.app.locals.poller`를 통해 이 서비스들에 접근한다. Express의 `app.locals`는 DI 컨테이너가 아니라 요청 컨텍스트 저장소이므로, 타입 안전성이 없고 테스트에서 모킹하려면 app 객체 전체를 조작해야 한다.
+**위치**: LaneManager.jsx L33-37
 
-```javascript
-// 현재: 라우트에서 암묵적 의존
-req.app.locals.wsServer?.broadcastToAccount(...)
-req.app.locals.poller?.forceUpdate(...)
+**문제**: `LaneEditor`의 `onSave` prop은 저장 완료 후 서버 응답 객체(`saved`)를 인자로 전달한다. 그러나 `LaneManager.handleSaved`는 인자를 받지 않고 단순히 목록 뷰로 전환만 한다.
 
-// 개선: 라우트 팩토리에 명시적 DI
-export default function vesselRoutes(prisma, { wsServer, poller }) {
+```jsx
+// LaneEditor.jsx — saved 객체를 onSave에 전달
+const saved = await res.json();
+onSave(saved);  // saved = { id, name, coordinates, ... }
+
+// LaneManager.jsx — 인자를 무시
+const handleSaved = () => {
+  setEditingLane(null);
+  setView("list");
+};
+```
+
+**영향**: 저장 직후 방금 만든 항로를 바로 미리볼 수 없다. 신규 항로를 저장하면 목록으로 이동하지만, `LaneList`가 다시 `fetchLanes()`를 실행하기 때문에 약간의 지연 후에야 표시된다. 더 중요하게는, App.jsx의 lanes 상태를 업데이트할 콜백 경로가 없다.
+
+**수정 방향**:
+
+```jsx
+// LaneManager.jsx
+export default function LaneManager({ apiFetch, onClose, onLaneSaved }) {
+  const handleSaved = (savedLane) => {
+    onLaneSaved?.(savedLane);  // App.jsx에 저장 알림
+    setEditingLane(null);
+    setView("list");
+  };
   ...
-  wsServer.broadcastToAccount(...)
-  poller.forceUpdate(...)
 }
 
-// index.js에서 조합
-app.use("/api/vessels", vesselRoutes(prisma, { wsServer, poller: datalasticPoller }));
-```
-
-**영향**: 현재 구조에서 `vessels.js`를 단위 테스트하려면 `req.app.locals`에 mock을 주입하는 복잡한 설정이 필요하다. 명시적 DI 방식으로 변경하면 `vesselRoutes(mockPrisma, { wsServer: mockWs, poller: mockPoller })`로 간단히 테스트할 수 있다.
-
----
-
-#### 4. 폴링 로직 중복 — DRY 위반 [서비스 레이어]
-
-**문제**: `datalasticPoller.js`의 `pollPositions` 함수와 `forceUpdate` 함수는 거의 동일한 로직을 가진다. API 호출, 위치 파싱, 스푸핑 감지, DB upsert, geofence 검사, onPosition 콜백 호출이 모두 두 곳에 중복된다. `pollPositions`는 약 80줄, `forceUpdate`의 핵심 루프는 약 90줄로 대부분 동일한 코드다.
-
-**리팩토링 제안**:
-
-```javascript
-// 공통 로직을 내부 함수로 추출
-async function processVessel(v, prisma, onPosition, onZoneEvent, logger) {
-  const params = v.imo ? { imo: v.imo } : { mmsi: v.mmsi };
-  const res = await apiCall("vessel", params);
-  // ... 파싱, 스푸핑, upsert, geofence 공통 처리
-}
-
-// pollPositions와 forceUpdate는 대상 선박 목록만 결정하고 processVessel 호출
-async function pollPositions() {
-  const vessels = await prisma.vessel.findMany({ where: { active: true } });
-  for (const v of vessels) await processVessel(v, prisma, onPosition, onZoneEvent, null);
-}
-```
-
----
-
-### 🟡 설계 개선
-
-#### 5. 구조화된 로깅 부재 [관찰 가능성]
-
-**문제**: 전체 백엔드에서 `console.log` / `console.error` / `console.warn`만 사용한다. 로그 레벨 조정 불가, 파일 출력 불가, 구조화된 JSON 형식 없음, 요청 ID 추적 불가.
-
-**개선 제안 — winston 기반 로거**:
-
-```javascript
-// backend/src/utils/logger.js
-import winston from "winston";
-import DailyRotateFile from "winston-daily-rotate-file";
-
-export const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || "info",
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    }),
-    new DailyRotateFile({
-      filename: "logs/app-%DATE%.log",
-      datePattern: "YYYY-MM-DD",
-      maxSize: "20m",          // 20MB 초과 시 rotation
-      maxFiles: "30d",         // 30일 보관
-      zippedArchive: true,
-    }),
-    new DailyRotateFile({
-      filename: "logs/error-%DATE%.log",
-      datePattern: "YYYY-MM-DD",
-      level: "error",
-      maxSize: "10m",
-      maxFiles: "30d",
-    }),
-  ],
-});
-```
-
-설치: `npm install winston winston-daily-rotate-file`
-
-`console.log` → `logger.info`, `console.error` → `logger.error`, `console.warn` → `logger.warn`으로 일괄 교체한다.
-
----
-
-#### 6. `Account` 모델 기능 미완성 — vesselLimit, 폴링 스케줄 [데이터 모델]
-
-**문제**: 계정별 선박 수 제한(`vesselLimit`)과 폴링 스케줄 설정이 없다. 현재 cron 표현식 `"0 4,6,8,11,15,23 * * *"`이 `datalasticPoller.js` 소스코드에 하드코딩되어 있다. 계정 생성/삭제 API 엔드포인트도 없다 (`admin.js`에는 비밀번호 변경만 있다).
-
-**개선 제안 — 스키마 확장**:
-
-```prisma
-model Account {
-  id           Int      @id @default(autoincrement())
-  name         String   @unique
-  password     String
-  role         String   @default("user")
-  vesselLimit  Int      @default(20)     // 계정별 선박 등록 한도
-  createdAt    DateTime @default(now())
-}
-
-model SystemConfig {
-  id        Int      @id @default(autoincrement())
-  key       String   @unique             // e.g. "poll_cron"
-  value     String                       // e.g. "0 4,6,8,11,15,23 * * *"
-  updatedAt DateTime @updatedAt
-}
-```
-
-폴러 초기화 시 `SystemConfig`에서 cron 표현식을 읽어오면 재배포 없이 스케줄 변경이 가능해진다.
-
-**계정 CRUD API 추가** (`admin.js`):
-
-```javascript
-// POST /api/admin/accounts — 계정 생성
-router.post("/accounts", async (req, res) => {
-  const { name, password, role, vesselLimit } = req.body;
-  // 유효성 검증 후
-  const account = await prisma.account.create({
-    data: { name, password, role: role || "user", vesselLimit: vesselLimit || 20 }
+// App.jsx
+const handleLaneSaved = (lane) => {
+  setLanes(prev => {
+    const idx = prev.findIndex(l => l.id === lane.id);
+    return idx >= 0
+      ? prev.map(l => l.id === lane.id ? lane : l)   // 수정
+      : [...prev, lane];                              // 신규
   });
-  clearAccountCache();
-  res.status(201).json({ id: account.id, name: account.name, role: account.role });
-});
-
-// DELETE /api/admin/accounts/:name — 계정 삭제
-router.delete("/accounts/:name", async (req, res) => {
-  // admin 계정은 삭제 불가 guard 필요
-  await prisma.account.delete({ where: { name: req.params.name } });
-  clearAccountCache();
-  res.json({ success: true });
-});
-```
-
-`vesselLimit` 체크는 `vessels.js` POST 라우트에서 `existingCount >= account.vesselLimit`로 추가한다.
-
----
-
-#### 7. localStorage 인증 토큰 분산 [프론트엔드 / ISP]
-
-**문제**: localStorage 키(`vessel_auth`, `vessel_auth_expires`, `vessel_account`, `vessel_role`, `vessel_sidebar_width`, `vessel_zone_settings`, `vessel_custom_groups`)에 대한 접근이 `App.jsx`의 여러 위치와 초기화 함수에 분산되어 있다. `wsUrl` 구성(`localStorage.getItem("vessel_auth")`)도 App.jsx 본문에 인라인으로 작성되어 있다. 또한 비밀번호 평문이 localStorage에 저장되어 Bearer 토큰으로 사용된다.
-
-**개선 제안**:
-
-```javascript
-// frontend/src/utils/storage.js
-const KEYS = {
-  AUTH:    "vessel_auth",
-  EXPIRES: "vessel_auth_expires",
-  ACCOUNT: "vessel_account",
-  ROLE:    "vessel_role",
 };
 
-export const storage = {
-  getAuth: ()    => localStorage.getItem(KEYS.AUTH) || "",
-  setAuth: (pw, account, role) => {
-    localStorage.setItem(KEYS.AUTH, pw);
-    localStorage.setItem(KEYS.EXPIRES, String(Date.now() + 86400000));
-    localStorage.setItem(KEYS.ACCOUNT, account);
-    localStorage.setItem(KEYS.ROLE, role);
-  },
-  clearAuth: () => Object.values(KEYS).forEach(k => localStorage.removeItem(k)),
-  isValid: () => {
-    const expires = localStorage.getItem(KEYS.EXPIRES);
-    return expires && Date.now() < parseInt(expires, 10);
-  },
+<LaneManager apiFetch={apiFetch} onClose={...} onLaneSaved={handleLaneSaved} />
+```
+
+---
+
+### 3. LaneEditor가 /admin/vessels를 직접 fetch — admin 권한 종속성 암묵적 가정
+
+**위치**: LaneEditor.jsx L81-95
+
+**문제**: `LaneEditor`의 useEffect에서 `apiFetch("/admin/vessels")`를 호출한다. `/admin/vessels` 엔드포인트는 admin 전용이다. LaneEditor 자체도 현재 admin만 접근 가능하지만, 이 의존성이 컴포넌트 내부에 하드코딩되어 있어 향후 권한 구조 변경 시 숨겨진 버그로 이어진다.
+
+```jsx
+// LaneEditor.jsx L82-83 — admin 전용 엔드포인트를 컴포넌트가 직접 가정
+apiFetch("/admin/vessels")
+  .then((r) => (r.ok ? r.json() : []))
+```
+
+`/api/lanes`의 GET은 모든 인증 사용자에게 열려 있지만, 항적 가져오기용 선박 목록 조회는 admin 엔드포인트에 묶여 있다.
+
+**수정 방향**: `/admin/vessels` 대신 `/vessels`(일반 vessel 목록 API)를 사용하거나, `vessels` 배열을 prop으로 주입받는다.
+
+```jsx
+// 옵션 A: vessels prop 주입 (권장)
+export default function LaneEditor({ apiFetch, initialLane, onSave, onCancel, vessels = [] }) {
+  // useEffect로 /admin/vessels fetch 제거
+  ...
+}
+
+// LaneManager.jsx에서 App.jsx의 vessels 상태를 전달
+<LaneEditor ... vessels={vessels} />
+```
+
+---
+
+## 🟡 개선 권장
+
+### 4. toLeaflet / toGeoJSON 헬퍼가 LaneEditor에만 존재 — 재사용 불가
+
+**위치**: LaneEditor.jsx L8-9
+
+**문제**: `toLeaflet([lon,lat][] → [lat,lon][])`, `toGeoJSON([lat,lon][] → [lon,lat][])` 두 함수가 LaneEditor 파일 상단에 모듈 스코프 함수로 정의되어 있다. ETA 계산, VesselTrack 렌더링, RestrictedZone 등 다른 컴포넌트에서도 동일한 좌표 변환이 필요할 때 복사·붙여넣기가 발생한다.
+
+**수정 방향**: `frontend/src/utils/geo.js`로 추출하고 import 사용.
+
+```js
+// frontend/src/utils/geo.js
+/** DB/GeoJSON [lon, lat][] → Leaflet [lat, lon][] */
+export const toLeaflet = (lonLats) => lonLats.map(([lon, lat]) => [lat, lon]);
+
+/** Leaflet [lat, lon][] → DB/GeoJSON [lon, lat][] */
+export const toGeoJSON = (latLons) => latLons.map(([lat, lon]) => [lon, lat]);
+```
+
+`simplifyAdaptive` 함수도 동일한 파일 또는 `frontend/src/utils/geoProcessing.js`에 함께 두는 것이 적합하다.
+
+---
+
+### 5. LaneEditor 내 MapContainer 독립 인스턴스 — 타일 설정 중복
+
+**위치**: LaneEditor.jsx L334-413 / Map/index.jsx
+
+**문제**: LaneEditor는 `MapContainer`를 직접 생성하며 타일 레이어 URL, attribution, subdomains, maxZoom을 별도로 하드코딩한다. 메인 Map 컴포넌트(`Map/index.jsx`)에도 동일한 설정이 있다. 타일 공급자를 변경할 경우 두 곳을 수동으로 맞춰야 한다.
+
+```jsx
+// LaneEditor.jsx L341-346 — 타일 설정 하드코딩
+<TileLayer
+  attribution="&copy; OpenStreetMap contributors &copy; CARTO"
+  url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+  subdomains="abcd"
+  maxZoom={19}
+/>
+```
+
+**현실적 판단**: LaneEditor는 전체 화면 오버레이로 독립적인 지도 인스턴스가 맞는 설계다(react-leaflet의 MapContainer는 하나의 L.Map을 소유하므로 공유 불가). 따라서 MapContainer 자체를 공유하는 것은 불가능하나, 타일 설정만 상수로 추출해 공유하면 충분하다.
+
+```js
+// frontend/src/utils/mapConfig.js
+export const CARTO_TILE = {
+  url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+  attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+  subdomains: "abcd",
+  maxZoom: 19,
 };
 ```
 
 ---
 
-#### 8. `geofenceChecker` 싱글턴 모듈 스코프 상태 [테스트 가능성]
+### 6. LaneManager의 list/editor 전환 — 뒤로가기 히스토리 없음
 
-**문제**: `geofenceChecker.js` 파일 말미에 `export const geofenceChecker = new GeofenceChecker()`로 싱글턴을 모듈 레벨에서 생성한다. `datalasticPoller.js`가 이 싱글턴을 직접 `import`해 사용하므로, 테스트에서 geofence 동작을 제어하려면 모듈 모킹이 필요하다. `vesselZoneState`가 메모리에 있어 서버 재시작 시 초기화되고, `initState`를 통해 DB에서 복원하는 설계는 적절하지만, 상태가 싱글턴에 갇혀 있어 멀티 인스턴스 배포(PM2 클러스터 모드)에서 문제가 된다.
+**위치**: LaneManager.jsx
 
-**개선 제안**: 현재 규모에서 클러스터 모드는 불필요하므로 즉각적인 구조 변경보다는, `GeofenceChecker`를 `createDatalasticPoller`처럼 팩토리 함수로 변경하여 DI를 용이하게 하는 것을 권장한다.
+**문제**: `view` 상태를 `"list" | "editor"` 문자열로 관리한다. 브라우저 뒤로가기 버튼이 에디터 → 목록으로 이동하지 않고 앱 전체를 빠져나간다. 현재는 관리자 전용이므로 큰 문제가 아니지만, 에디터에서 실수로 큰 변경 후 취소 경로가 onCancel 버튼뿐이다.
 
----
-
-#### 9. `admin.js`의 Raw SQL 사용 [데이터 접근 일관성]
-
-**문제**: `admin.js` 36~57번 줄에서 일별 API 사용량 집계에 `prisma.$queryRaw`를 사용한다. 나머지 모든 쿼리는 Prisma ORM을 사용하므로 일관성이 없고, DB를 PostgreSQL 외 다른 것으로 바꿀 때 `DATE()` 함수 호환성 문제가 생길 수 있다.
-
-**개선 제안**:
-
-```javascript
-// Raw SQL 대신 Prisma groupBy + createdAt 날짜 추출
-const dailyRaw = await prisma.apiUsage.findMany({
-  where: { createdAt: { gte: thirtyDaysAgo } },
-  select: { createdAt: true, credits: true },
-});
-// JavaScript에서 날짜별 집계
-const dailyMap = {};
-for (const r of dailyRaw) {
-  const date = r.createdAt.toISOString().slice(0, 10);
-  dailyMap[date] = (dailyMap[date] || 0) + r.credits;
-}
-```
+**수정 방향**: URL hash나 react-router history를 사용하거나, 브라우저 뒤로가기를 인터셉트하는 popstate 리스너를 추가한다. 단기적으로는 에디터에서 변경 사항이 있을 때 onCancel 전에 확인 대화상자를 추가하는 것으로 충분하다.
 
 ---
 
-#### 10. `accounts.js` 비밀번호 평문 캐시 [보안 / 설계]
+### 7. LaneList의 handleToggleActive에서 fetchLanes() 재호출 — 낙관적 업데이트 누락
 
-**문제**: `accounts.js`의 `loadAccounts`가 `Map<password, accountInfo>` 형태로 캐시한다. 비밀번호가 Map의 key이므로 메모리 덤프 시 모든 비밀번호가 노출된다. 30초 TTL은 변경 반영을 위한 것이지만 캐시 구조 자체가 문제다. 또한 인증이 단순 문자열 비교(`accounts.get(password)`)이므로 타이밍 공격에 취약하다.
+**위치**: LaneList.jsx L37-54
 
-**개선 제안**: 비밀번호는 bcrypt 해시로 저장하고, Map의 key를 `account.name`으로 변경한 후, 인증 시 `bcrypt.compare(inputPassword, stored.hash)`를 사용한다. 이는 `clearAccountCache` 필요성도 줄인다.
+**문제**: 활성화/비활성화 토글 후 `fetchLanes()`를 다시 호출한다. 서버 왕복이 완료될 때까지 UI가 갱신되지 않아 체감 응답이 느리다. DELETE도 마찬가지다.
 
----
+**수정 방향**: 낙관적 업데이트를 먼저 적용하고, 실패 시 롤백한다.
 
-### 🟢 참고 사항
-
-#### 11. Route Factory 패턴 적절히 적용됨
-
-`vesselRoutes(prisma)`, `adminRoutes(prisma)`, `sharesRoutes(prisma)`, `portRoutes(prisma)` 모두 팩토리 함수로 prisma를 주입받는다. `app.locals` 우회 문제가 있지만, 기본 DI 방향은 올바르다.
-
-#### 12. `useWebSocket` 훅의 재연결 로직
-
-`useWebSocket.js`에서 `onMessageRef`를 통해 콜백 클로저 문제를 해결하고, 3초 재연결 로직을 깔끔하게 구현했다.
-
-#### 13. `checkSpoofing` 순수 함수 추출
-
-`datalasticPoller.js`에서 AIS 스푸핑 탐지 로직이 `checkSpoofing` 순수 함수로 분리되어 export되어 있다. `vessels.js`에서 히스토리 처리 시 재사용하고 있으며, 단위 테스트하기 좋은 구조다.
-
----
-
-## SOLID 원칙 평가
-
-| 원칙 | 상태 | 주요 위반 | 비고 |
-|------|------|---------|------|
-| S — SRP | ⚠️ | App.jsx (인증+CRUD+UI+레이아웃 혼재), datalasticPoller (폴링 로직 중복) | 백엔드 각 라우트 파일은 적절히 분리됨 |
-| O — OCP | ⚠️ | 새 계정 추가 시 소스 코드(cron, 하드코딩 account 기본값) 수정 필요 | 라우트 구조는 OCP 잘 준수 |
-| L — LSP | ✅ | 해당 없음 | 상속 구조가 거의 없어 위반 여지 없음 |
-| I — ISP | ⚠️ | wsServer.broadcast vs broadcastToAccount: 호출부가 필요 없는 메서드에도 노출됨 | 현재 규모에서는 허용 수준 |
-| D — DIP | ⚠️ | vessels.js → req.app.locals (암묵적 의존), geofenceChecker 싱글턴 직접 import | prisma DI는 잘 되어 있음 |
-
----
-
-## 의존성 그래프
-
-```
-index.js
-  ├── accounts.js (authenticate, clearAccountCache)
-  ├── services/wsServer.js ← prisma, accounts.js
-  ├── services/datalasticPoller.js ← prisma, geofenceChecker [직접 import — 결합]
-  │     └── services/geofenceChecker.js (싱글턴)
-  ├── services/cleanup.js ← prisma
-  ├── routes/vessels.js ← prisma, datalasticPoller [apiCall, checkSpoofing export]
-  │     └── (req.app.locals.wsServer, req.app.locals.poller — 암묵적 의존)
-  ├── routes/admin.js ← prisma, accounts.js
-  ├── routes/shares.js ← prisma
-  └── routes/ports.js ← prisma
-
-순환 참조: 없음
-문제 의존: datalasticPoller → geofenceChecker (싱글턴 직접 결합)
-           vessels.js → app.locals (암묵적 서비스 접근)
-```
-
----
-
-## 레이어 분석
-
-| 레이어 | 모듈 | 관심사 | 의존 방향 | 상태 |
-|--------|------|--------|----------|------|
-| 진입점 | index.js | 서비스 조합, HTTP 서버 | 모든 서비스 참조 | ⚠️ 조합 책임은 맞으나 force-update 라우트가 인라인 정의됨 |
-| 라우트 | routes/*.js | HTTP 요청/응답, 입력 검증 | prisma, app.locals | ⚠️ app.locals 의존이 레이어 경계를 모호하게 함 |
-| 서비스 | services/*.js | 비즈니스 로직, 외부 API, WebSocket | prisma, 서비스 간 직접 참조 | 🟡 서비스 간 결합 존재 |
-| 데이터 | prisma (ORM) | DB 접근 추상화 | DB | ✅ 적절 |
-| 도메인 모델 | schema.prisma | 데이터 구조 | 없음 | ⚠️ Vessel에 account 직접 포함, 다계정 공유 불가 |
-
----
-
-## 테스트 가능성 평가
-
-| 모듈 | DI 지원 | 모킹 용이 | 부수효과 격리 | 점수 |
-|------|--------|---------|-------------|------|
-| routes/vessels.js | ⚠️ (prisma만, ws/poller는 app.locals) | 어려움 | ❌ app.locals 직접 접근 | 5/10 |
-| routes/admin.js | ✅ (prisma DI) | 용이 | ✅ | 8/10 |
-| services/datalasticPoller.js | ✅ (prisma, 콜백 DI) | 중간 (geofenceChecker 싱글턴) | ⚠️ | 6/10 |
-| services/geofenceChecker.js | ❌ (싱글턴) | 어려움 | ❌ 모듈 레벨 상태 | 4/10 |
-| accounts.js | ⚠️ (prisma 인수, 모듈 레벨 캐시) | 중간 | ⚠️ 모듈 레벨 캐시 | 6/10 |
-| frontend/App.jsx | ❌ | 매우 어려움 (모든 상태 내부) | ❌ | 3/10 |
-| frontend/useWebSocket.js | ✅ (url, onMessage 인수) | 용이 | ✅ | 9/10 |
-
----
-
-## 설계 패턴 분석
-
-| 패턴 | 적용 여부 | 적절성 | 비고 |
-|------|---------|--------|------|
-| Factory Function (라우트) | ✅ 적용 | 적절 | vesselRoutes(prisma) 등 |
-| Observer/Callback (WebSocket 브로드캐스트) | ✅ 적용 | 적절 | onPosition, onVesselUpdate 콜백 |
-| Singleton (geofenceChecker) | ✅ 적용 | 부분적으로 부적절 | 테스트 어려움, DI 불가 |
-| Repository (Prisma) | ✅ 적용 (간접) | 적절 | ORM이 이 역할 수행 |
-| Caching (accounts.js TTL 캐시) | ✅ 적용 | 구조 개선 여지 | password를 key로 사용 문제 |
-| 다계정 공유 (중간 테이블) | ❌ 미적용 | 필요 | VesselAccount 테이블 필요 |
-| Structured Logging | ❌ 미적용 | 필요 | console.* 만 사용 |
-
----
-
-## 칭찬할 점
-
-1. **라우트 팩토리 패턴**: 모든 라우트가 `prisma`를 팩토리 인수로 받아 데이터 접근 계층을 올바르게 주입받는다. Express 앱에서 흔히 보이는 전역 prisma 참조 패턴을 피한 것은 좋은 선택이다.
-
-2. **WebSocket 계정 격리**: `wsServer.broadcastToAccount`가 계정명과 admin 역할을 확인하여 데이터 격리를 WebSocket 레벨에서도 시행한다. 단순히 HTTP 레이어에서만 인증하는 것에 비해 더 안전한 구조다.
-
-3. **스푸핑 감지 순수 함수**: `checkSpoofing`이 외부 의존 없이 순수 함수로 추출되어 `datalasticPoller.js`와 `vessels.js` 양쪽에서 재사용된다. 도메인 로직을 서비스 구현과 분리한 올바른 방향이다.
-
-4. **Geofence BBox 사전 필터**: `geofenceChecker.js`의 `checkPoint`에서 Bounding Box 사전 필터로 전체 영역 대비 ray casting 연산을 최소화한 성능 최적화가 잘 되어 있다.
-
-5. **useWebSocket 재연결 + 클로저 문제 해결**: `onMessageRef`를 통해 React 클로저 이슈(stale closure)를 올바르게 처리하고, 3초 재연결 로직도 cleanup이 깔끔하다.
-
----
-
-## 요청 기능 아키텍처 설계
-
-### 기능 1: 로깅 시스템 (일자별 파일 분리 + Rotation)
-
-**의존성 추가**:
-```
-npm install winston winston-daily-rotate-file
-```
-
-**파일 구조**:
-```
-backend/
-├── src/
-│   └── utils/
-│       └── logger.js     // winston 인스턴스 export
-└── logs/                 // .gitignore에 추가
-    ├── app-2026-04-09.log
-    ├── app-2026-04-09.log.1  (20MB 초과 시 분할)
-    └── error-2026-04-09.log
-```
-
-**logger.js 설계**:
-```javascript
-import winston from "winston";
-import DailyRotateFile from "winston-daily-rotate-file";
-
-const { combine, timestamp, json, colorize, simple, errors } = winston.format;
-
-const fileFormat = combine(errors({ stack: true }), timestamp(), json());
-
-export const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || "info",
-  transports: [
-    // 콘솔 출력 (개발 환경)
-    new winston.transports.Console({
-      format: combine(colorize(), simple())
-    }),
-    // 전체 로그: 일자별 파일, 20MB 초과 시 .1, .2 분할, 30일 보관
-    new DailyRotateFile({
-      filename:       "logs/app-%DATE%.log",
-      datePattern:    "YYYY-MM-DD",
-      maxSize:        "20m",
-      maxFiles:       "30d",
-      zippedArchive:  true,
-      format:         fileFormat,
-    }),
-    // 에러만 별도 파일
-    new DailyRotateFile({
-      filename:       "logs/error-%DATE%.log",
-      datePattern:    "YYYY-MM-DD",
-      level:          "error",
-      maxSize:        "10m",
-      maxFiles:       "30d",
-      zippedArchive:  true,
-      format:         fileFormat,
-    }),
-  ],
-});
-```
-
-**마이그레이션**: `console.log` → `logger.info`, `console.error` → `logger.error`, `console.warn` → `logger.warn`. 구조화된 데이터를 두 번째 인수로 넘긴다:
-```javascript
-// 기존
-console.log(`[Datalastic] ✅ ${v.mmsi} (${d.name}) | ${lat},${lon}`);
-// 변경
-logger.info("position_polled", { mmsi: v.mmsi, name: d.name, lat, lon });
-```
-
----
-
-### 기능 2: 계정 관리 확장 (생성/삭제, vesselLimit, 폴링 스케줄)
-
-**스키마 변경**:
-```prisma
-model Account {
-  id          Int      @id @default(autoincrement())
-  name        String   @unique
-  password    String
-  role        String   @default("user")
-  vesselLimit Int      @default(20)
-  createdAt   DateTime @default(now())
-}
-
-model SystemConfig {
-  id        Int      @id @default(autoincrement())
-  key       String   @unique
-  value     String
-  updatedAt DateTime @updatedAt
-}
-```
-
-**SystemConfig 초기 시드** (마이그레이션 또는 init에서):
-```javascript
-await prisma.systemConfig.upsert({
-  where: { key: "poll_cron" },
-  create: { key: "poll_cron", value: "0 4,6,8,11,15,23 * * *" },
-  update: {},
-});
-```
-
-**폴러 동적 스케줄 적용**:
-```javascript
-// datalasticPoller.js start()
-async start() {
-  const config = await prisma.systemConfig.findUnique({ where: { key: "poll_cron" } });
-  const cronExpr = config?.value || "0 4,6,8,11,15,23 * * *";
-  const task = cron.schedule(cronExpr, () => pollPositions());
-  tasks.push(task);
-}
-```
-
-**admin.js 신규 엔드포인트**:
-```
-POST   /api/admin/accounts              계정 생성 (name, password, role, vesselLimit)
-DELETE /api/admin/accounts/:name        계정 삭제 (admin 계정은 삭제 불가)
-PATCH  /api/admin/config/poll-cron      폴링 스케줄 변경 (cron 표현식 유효성 검증 후 저장)
-```
-
-`POST /api/vessels` 라우트에서 vesselLimit 체크 추가:
-```javascript
-const accountRow = await prisma.account.findUnique({ where: { name: account } });
-const limit = accountRow?.vesselLimit ?? 20;
-if (existingCount >= limit) {
-  return res.status(403).json({ error: `선박 등록 한도(${limit}척)에 도달했습니다` });
-}
-```
-
----
-
-### 기능 3: 다계정 선박 공유 + 폴링 중복 방지
-
-**단기 해결책 (옵션 A — 최소 변경, 권장)**:
-
-스키마:
-```prisma
-model Vessel {
-  mmsi    String
-  account String @default("kb")
-  // ... 나머지 필드 동일
-  @@unique([account, mmsi])   // @unique 제거, 복합 unique 추가
-  @@index([account])
-}
-```
-
-마이그레이션 주의: 기존 `@unique` 인덱스 drop → 복합 unique 인덱스 create. 기존 데이터에 (account, mmsi) 중복은 없으므로 무손실 마이그레이션 가능.
-
-폴러 중복 방지:
-```javascript
-async function pollPositions() {
-  const vessels = await prisma.vessel.findMany({ where: { active: true } });
-  
-  // MMSI 기준 중복 제거: 같은 MMSI는 한 번만 API 호출
-  const mmsiMap = new Map(); // mmsi → vessel (첫 번째만 사용)
-  for (const v of vessels) {
-    if (!mmsiMap.has(v.mmsi)) mmsiMap.set(v.mmsi, v);
+```jsx
+const handleToggleActive = async (lane) => {
+  // 낙관적 업데이트
+  setLanes(prev => prev.map(l => l.id === lane.id ? {...l, active: !l.active} : l));
+  try {
+    const res = await apiFetch(`/lanes/${lane.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ active: !lane.active }),
+    });
+    if (!res.ok) throw new Error();
+    setActionMsg(`"${lane.name}" ${!lane.active ? "활성화" : "비활성화"} 완료`);
+  } catch {
+    // 롤백
+    setLanes(prev => prev.map(l => l.id === lane.id ? {...l, active: lane.active} : l));
+    setActionMsg("변경 실패");
   }
-  const uniqueVessels = Array.from(mmsiMap.values());
-  
-  for (const v of uniqueVessels) {
-    const positionData = await fetchAndSavePosition(v);
-    if (!positionData) continue;
-    
-    // 해당 MMSI를 추적하는 모든 계정에 브로드캐스트
-    const allAccounts = vessels
-      .filter(a => a.mmsi === v.mmsi)
-      .map(a => a.account);
-    
-    for (const account of allAccounts) {
-      onPosition({ ...positionData, account });
-    }
-  }
+  setTimeout(() => setActionMsg(""), 3000);
+};
+```
+
+---
+
+### 8. lanes.js PUT에서 active 단독 업데이트와 전체 수정이 같은 엔드포인트 — 의도 모호
+
+**위치**: lanes.js L103-152
+
+**문제**: PUT `/api/lanes/:id`는 `name`, `description`, `coordinates`, `color`, `active` 모두를 선택적으로 받는다. `LaneList`에서는 `{ active: false }` 하나만 보내고, `LaneEditor`에서는 전체 필드를 보낸다. 단일 PUT이 부분 업데이트와 전체 교체를 겸하고 있어 의미가 모호하다. 특히 `coordinates`가 undefined일 때 기존 값을 유지하는 로직이 스프레드로 처리되어 있어 명시적이지 않다.
+
+**수정 방향**: 장기적으로는 `PATCH`(부분 업데이트)와 `PUT`(전체 교체)를 분리하는 것이 REST 관례에 부합한다. 단기적으로는 현재 구조를 유지하되 주석으로 "이 엔드포인트는 partial update를 지원함"을 명시한다.
+
+---
+
+## 🟢 잘 된 점
+
+### 1. apiFetch prop 일관성 유지
+
+LaneEditor, LaneList, LaneManager 모두 `apiFetch`를 prop으로 주입받는다. App.jsx의 인증 헤더 처리 로직이 한 곳에만 있고, 모든 하위 컴포넌트가 이를 재사용한다. 인증 방식(토큰 → 패스워드 폴백)이 바뀌어도 App.jsx의 `apiFetch` 함수만 수정하면 된다.
+
+### 2. lanes.js의 권한 분리 설계
+
+GET(목록/단건)은 모든 인증 사용자에게 열고, `router.use(adminGuard)` 이후의 POST/PUT/DELETE는 admin에게만 제한한다. 미들웨어 위치로 권한 경계를 명확히 표현하고 있어 실수로 admin 전용 액션을 노출하기 어렵다.
+
+### 3. simplifyAdaptive의 폴백 전략
+
+turf.js 단순화 결과가 2포인트 미만으로 떨어질 경우 균등 샘플링으로 폴백한다. 단순히 `turf.simplify`만 믿지 않고 최소 보장 조건(포인트 2개 이상)을 명시적으로 처리한다.
+
+### 4. validateCoordinates 서버 측 검증
+
+좌표 배열의 길이, 타입, 범위를 백엔드에서 명시적으로 검증한다. 프론트엔드 검증(waypoints.length < 2)과 이중으로 보호되어 있어 직접 API 호출로도 잘못된 데이터가 저장되지 않는다.
+
+---
+
+## 구조 개선 제안 — 컴포넌트 의존성 그래프
+
+**현재**:
+```
+App.jsx
+  └── LaneManager (adminView === "lane-manager" 시 App 전체 대체)
+        ├── LaneList  (독립 fetch — /lanes)
+        └── LaneEditor (독립 fetch — /admin/vessels, /vessels/:id/positions, /lanes)
+
+Map/index.jsx
+  └── lanes 데이터 없음 (항로 표시 불가)
+```
+
+**개선 후**:
+```
+App.jsx
+  ├── lanes 상태 (/lanes 초기 로드 + onLaneSaved 업데이트)
+  ├── LaneManager (onLaneSaved 콜백 전달)
+  │     ├── LaneList  (lanes prop 받거나 독립 fetch 유지)
+  │     └── LaneEditor (vessels prop 주입, /admin/vessels 직접 호출 제거)
+  └── Map/index.jsx
+        └── lanes prop 전달 → ShippingLaneLayer 컴포넌트로 렌더링
+```
+
+---
+
+## ETA 기능 추가 권장 아키텍처
+
+### 배경 및 목표
+
+사전 정의된 항로(ShippingLane)를 기준으로, 현재 선박 위치에서 항로 상의 특정 웨이포인트(목적지)까지의 예상 도착 시간을 계산한다.
+
+### 계산 로직 위치 결정 — Frontend vs Backend
+
+**권장: Frontend(utils)에서 계산**
+
+이유:
+1. ETA 계산에 필요한 모든 데이터(선박 현재 위치, 속도, 항로 좌표)가 이미 App.jsx 상태에 있다.
+2. turf.js가 이미 LaneEditor에서 사용 중이고 의존성이 설치되어 있다.
+3. 계산 결과는 사용자 세션에서만 필요하며 영속성이 불필요하다.
+4. 백엔드 API 호출 없이 즉시 반응하는 UX가 가능하다.
+
+Backend 계산이 필요한 경우: 계산 결과를 저장하거나, 다수 선박의 배치 ETA를 외부 시스템에 제공하거나, 계산 로직이 복잡해 서버 캐싱이 필요할 때.
+
+### 계산 로직 설계
+
+```js
+// frontend/src/utils/eta.js
+
+import * as turf from "@turf/turf";
+import { toGeoJSON } from "./geo";
+
+/**
+ * 선박의 현재 위치와 속도(SOG)를 기반으로 항로 상의 목적지까지 ETA를 계산한다.
+ *
+ * @param {object} vesselPos - { lat, lon, sog } (sog: knots)
+ * @param {number[][]} laneCoords - [[lon, lat], ...] (GeoJSON 순서)
+ * @param {number} destWaypointIdx - 목적지 웨이포인트 인덱스
+ * @returns {{ distanceNm: number, etaDate: Date | null, remainingCoords: number[][] }}
+ */
+export function calcETA(vesselPos, laneCoords, destWaypointIdx) {
+  if (!vesselPos || !laneCoords || laneCoords.length < 2) return null;
+  if (destWaypointIdx < 0 || destWaypointIdx >= laneCoords.length) return null;
+
+  const vesselPoint = turf.point([vesselPos.lon, vesselPos.lat]);
+  const line = turf.lineString(laneCoords);
+
+  // 선박과 가장 가까운 항로 상의 점 탐색
+  const nearestOnLine = turf.nearestPointOnLine(line, vesselPoint);
+  const nearestIdx = nearestOnLine.properties.index ?? 0;
+
+  // 목적지가 이미 지나쳤는지 확인
+  if (destWaypointIdx <= nearestIdx) return null;
+
+  // nearestOnLine → destWaypoint 구간 좌표 추출
+  const remainingCoords = [
+    nearestOnLine.geometry.coordinates,
+    ...laneCoords.slice(nearestIdx + 1, destWaypointIdx + 1),
+  ];
+
+  if (remainingCoords.length < 2) return null;
+
+  const remainingLine = turf.lineString(remainingCoords);
+  const distanceKm = turf.length(remainingLine, { units: "kilometers" });
+  const distanceNm = distanceKm / 1.852;
+
+  const sogKnots = vesselPos.sog ?? 0;
+  const etaDate = sogKnots > 0.1
+    ? new Date(Date.now() + (distanceNm / sogKnots) * 3600 * 1000)
+    : null;
+
+  return { distanceNm, etaDate, remainingCoords };
 }
 ```
 
-wsServer 변경: `broadcastToAccount`를 호출할 때 position data에 vesselId가 아니라 모든 관련 계정의 vesselId를 포함해야 하므로, 브로드캐스트 방식 조정이 필요하다.
+### 상태 관리 위치
 
-**장기 해결책 (옵션 B — VesselAccount 테이블)**은 앞서 "구조적 문제 #1"에서 ERD를 제시했다. 옵션 B는 alias, color, companyType, active를 계정마다 독립적으로 설정할 수 있어 더 유연하지만, API 및 프론트엔드 변경 범위가 크다. 현재 사용 패턴(2-3개 계정, 수십 척 선박)에서는 옵션 A로 시작하고, 계정별 독립 설정 요구사항이 생기면 옵션 B로 전환하는 것을 권장한다.
+ETA 계산 파라미터(선택된 선박 + 목적지 웨이포인트)는 App.jsx 대신 **ETAPanel 컴포넌트 로컬 상태**로 관리한다. App.jsx는 이미 충분히 크고, ETA 파라미터는 전역 상태가 필요 없다.
+
+```
+App.jsx
+  └── Map/index.jsx (lanes, vessels, positions prop 수신)
+        ├── ShippingLaneLayer.jsx — 항로 폴리라인 렌더링 + 웨이포인트 클릭 핸들러
+        └── ETAPanel.jsx          — 선택된 선박 + 클릭된 목적지 → calcETA 호출 → 표시
+```
+
+단, 선택된 선박 ID(`selectedVesselId`)는 App.jsx에서 관리되므로 `selectedVesselId` + 현재 위치는 Map을 통해 ETAPanel에 내려준다.
+
+### 컴포넌트 추가 목록
+
+| 컴포넌트/파일 | 역할 |
+|---|---|
+| `frontend/src/utils/geo.js` | toLeaflet, toGeoJSON 공용 함수 |
+| `frontend/src/utils/eta.js` | calcETA 계산 로직 |
+| `frontend/src/utils/mapConfig.js` | CARTO_TILE 등 지도 설정 상수 |
+| `frontend/src/components/Map/ShippingLaneLayer.jsx` | lanes 배열을 받아 Polyline + 웨이포인트 마커 렌더링 |
+| `frontend/src/components/Map/ETAPanel.jsx` | 선택된 목적지 웨이포인트 + ETA 결과 표시 UI |
+
+### App.jsx 변경 범위 (최소화)
+
+```jsx
+// 추가: lanes 상태
+const [lanes, setLanes] = useState([]);
+
+// 추가: lanes 초기 로드
+useEffect(() => {
+  if (!isAuthed) return;
+  apiFetch("/lanes").then(r => r.ok ? r.json() : []).then(setLanes);
+}, [isAuthed, apiFetch]);
+
+// 추가: LaneManager에 onLaneSaved 전달
+const handleLaneSaved = (lane) => {
+  setLanes(prev => {
+    const idx = prev.findIndex(l => l.id === lane.id);
+    return idx >= 0 ? prev.map(l => l.id === lane.id ? lane : l) : [...prev, lane];
+  });
+};
+
+// 변경: Map에 lanes prop 추가
+<Map ... lanes={lanes} />
+```
+
+App.jsx 추가 코드는 약 15줄로 제한되며, 기존 상태 패턴과 완전히 일관된다.
+
+### 구현 순서 (우선순위)
+
+1. `frontend/src/utils/geo.js` 생성 — LaneEditor의 toLeaflet/toGeoJSON 이전 (즉시 가능, 사이드이펙트 없음)
+2. App.jsx에 lanes 상태 추가 + Map에 전달
+3. `Map/ShippingLaneLayer.jsx` 구현 — 항로 폴리라인 렌더링
+4. `frontend/src/utils/eta.js` 구현
+5. `Map/ETAPanel.jsx` 구현 — 웨이포인트 클릭 시 ETA 표시
+6. LaneEditor의 `/admin/vessels` 호출을 vessels prop 주입으로 교체

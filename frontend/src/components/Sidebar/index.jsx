@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import VesselCard from "./VesselCard.jsx";
 import ApiUpdateModal from "../ApiUpdateModal.jsx";
 import ArchivedVesselsModal from "../ArchivedVesselsModal.jsx";
@@ -42,6 +42,31 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
 
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
     const [showArchiveModal, setShowArchiveModal] = useState(false);
+
+    // 지도에서 선박 클릭 시: 해당 선박이 속한 그룹을 펼치고 카드를 화면에 보이게 스크롤
+    useEffect(() => {
+        if (!selectedVesselId) return;
+
+        // 선박이 속한 그룹 찾기 → 접혀 있으면 펼침
+        const vessel = vessels.find(v => v.id === selectedVesselId);
+        if (vessel) {
+            const groupName = vessel.companyType || "자사간사";
+            setCollapsedGroups(prev => {
+                if (!prev.has(groupName)) return prev; // 이미 펼쳐져 있으면 변경 없음
+                const next = new Set(prev);
+                next.delete(groupName);
+                return next;
+            });
+        }
+
+        // 그룹 펼침 re-render 후 스크롤 실행
+        const timer = setTimeout(() => {
+            const el = document.getElementById(`vessel-card-${selectedVesselId}`);
+            el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }, 60);
+
+        return () => clearTimeout(timer);
+    }, [selectedVesselId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const toggleCollapse = (groupName, e) => {
         // Prevent toggle when clicking the "Hide/Show Group" button inside the header

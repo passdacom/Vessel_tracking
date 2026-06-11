@@ -1,50 +1,76 @@
-# Vessel Tracking System 🚢
+# Vessel Tracking System
 
-실시간 선박 위치 추적 및 상세 정보 조회 시스템입니다. 지정된 선박들의 위경도 위치뿐만 아니라 목적지, ETA, 선박 제원(GT, DWT 등)을 통합적으로 제공합니다.
-
----
-
-## 🏗️ 시스템 아키텍처
-
-- **Backend**: Node.js, Express, Prisma (PostgreSQL), node-cron
-- **Frontend**: React, Vite, Tailwind CSS, React-Leaflet
-- **Data Source**: [Datalastic API](https://datalastic.com/) (이전의 AISStream 연동은 연결 불안정 문제로 완전 제거됨)
+실시간 선박 위치 추적 시스템. 선박의 위경도 위치, 항적, 목적지/ETA, 선박 제원을 통합 제공하며 War Risk Zone 감시, 표준 항로 기반 ETA 계산, 멀티 어카운트를 지원합니다.
 
 ---
 
-## ✨ 핵심 기능
+## 시스템 아키텍처
 
-### 1. Datalastic API 기반 주기적 폴링 (Polling)
-- **IMO 기준 우선 폴링**: 선박 식별 시 **IMO 번호를 최우선**으로 사용하며, IMO가 없는 경우 MMSI를 차선책으로 사용합니다. (잦은 MMSI 변경이나 재할당으로 인한 데이터 혼선 방지)
-- **제원 및 위치 수집**: 
-  - `vessel_info` 엔드포인트: 선박 제원(GT, DWT, 선종, 건조년도, 국가 등)을 서버 시작 시 최초 1회 수집.
-  - `vessel` 엔드포인트: 현재 위치(위경도), 항로(COG), 속력(SOG), 목적지, ETA 정보 등을 주기적으로 수집.
-- **수집 스케줄**: KST(한국시간) 기준 하루 6회 주기적으로 자동 수집됩니다. (00:00, 08:00, 13:00, 15:00, 17:00, 20:00)
-- **오래된 데이터 정리**: 30일이 지난 과거 위치 데이터(`Position` 테이블)는 매일 자정 자동 삭제(`cleanup.js`)됩니다.
+```
+브라우저
+  ↓ (포트 18789)
+Nginx (리버스 프록시)
+  ├── /api/*  →  vessel-backend  (Node.js/Express, 포트 3001)
+  └── /*      →  vessel-frontend (Vite dev server, 포트 5173)
+```
 
-### 2. 향상된 선박 UI (VesselCard & Marker)
-- 선박 목록(사이드바) 및 지도 마커 팝업에 다음 정보가 확장 표시됩니다:
-  - 🏳️ **국기 이모지** (Country ISO 기반 자동 변환)
-  - 🚢 **선종** (Vessel Type / Type Specific)
-  - 📍 **목적지 및 ETA** (Destination, ETA UTC)
-  - ⚖️ **제원** (총톤수 GT, 재화중량 DWT, 건조년도)
-  - 🆔 **식별번호** (IMO, MMSI)
-- **상태 인디케이터**: 1시간 이상 신호가 없으면 빨간색 경고(⚠ 신호 없음) 표시, 1시간 이내면 녹색(● 활성) 표시.
-- **편집 기능**: 프론트엔드 UI를 통해 선박의 식별 색상 및 별칭(Alias) 변경 가능.
+- **Backend**: Node.js (ESM), Express, Prisma ORM, PostgreSQL
+- **Frontend**: React 18, Vite, Tailwind CSS, React-Leaflet, Turf.js
+- **데이터 소스**: Datalastic API (IMO 우선, MMSI 폴백)
 
 ---
 
-## 🚀 설치 및 주요 파일 구조
+## 주요 기능
 
-### 주요 파일
-- **`backend/src/index.js`**: 백엔드 진입점. 서버 및 크론잡 초기화. (AISStream 제거 완료)
-- **`backend/src/services/datalasticPoller.js`**: Datalastic API 주기적 호출, IMO 기반 조회 로직 핵심 파일.
-- **`frontend/src/components/Sidebar/VesselCard.jsx`**: 좌측 사이드바의 개별 선박 UI 컴포넌트.
-- **`frontend/src/components/Map/VesselMarker.jsx`**: 지도 상의 선박 아이콘 및 클릭 시 상세 정보 팝업 컴포넌트.
+### 선박 위치 추적
+- Datalastic API 주기적 폴링 (기본 KST 13:00, 15:00, 17:00, 20:00, 00:00, 08:00)
+- WebSocket으로 위치 업데이트 브로드캐스트
+- 위치 데이터 90일 보관 후 자동 삭제
+- 시간 이동 / 플레이백 기능
 
-### 로컬 실행 방법
-\`\`\`bash
-# Backend
+### 선박 정보
+- 선종, 국기, 총톤수(GT), 재화중량(DWT), 건조연도
+- AIS ETA/목적지 (trackHours 범위 밖 히스토리 fallback 포함)
+- 선박별 색상, 별칭 커스터마이징
+- 그룹(companyType) 기반 분류
+
+### 표준 항로 (ShippingLane) 관리
+- Admin 전용 항로 CRUD
+- 지도 기반 에디터: 웨이포인트 추가/이동/삭제, Undo/Redo 20단계
+- 항적 → 항로 자동 생성 (Turf.js simplify)
+- 즐겨찾기 웨이포인트 (localStorage)
+
+### ETA / 거리 계산
+- Turf.js 기반 항로 snap 알고리즘
+  - 총 거리 = 선박→진입점(직선) + 항로구간 + 이탈점→목적지(직선)
+  - 항로 없으면 Haversine 직선 fallback
+  - 선박/목적지가 항로에서 500nm 이상 떨어지면 해당 항로 제외 (잘못된 항로 선택 방지)
+- 목적지 설정: 지도 클릭 또는 항구 DB 검색
+- 속도 모드: 현재 SOG / 선종별 프리셋 / 직접 입력
+
+### War Risk Zone 감시
+- JWC War Risk Zone, 12nm bounds, Global 구역 지원
+- 진입/이탈 시 ZoneEvent 기록 + WebSocket 알림
+- Ray Casting 알고리즘 (외부 의존성 없음)
+
+### 멀티 어카운트
+- DB 기반 계정 관리 (admin/user role)
+- 계정별 선박 분리 및 열람 권한 제어
+- 세션 토큰 기반 인증
+
+### 공유 링크
+- 선택한 선박만 포함하는 공유 URL 생성 (비인증 접근)
+- 만료 시간 설정 가능
+
+---
+
+## 실행 방법
+
+```bash
+# PostgreSQL 시작
+docker-compose up -d
+
+# Backend (.env 필요: DATABASE_URL, DATALASTIC_API_KEY, AUTH_PASSWORD)
 cd backend
 npm install
 npx prisma generate
@@ -53,13 +79,45 @@ npm run dev
 # Frontend
 cd frontend
 npm install
-npm run dev
-\`\`\`
+npm run dev   # Vite dev server (포트 5173)
+```
+
+### PM2로 운영 시
+```bash
+pm2 start ecosystem.config.cjs
+pm2 status
+pm2 logs vessel-backend
+pm2 logs vessel-frontend
+```
 
 ---
 
-## 📝 최근 주요 변경 이력
-- **[2024년 3월 업데이트]**
-  - 불안정한 AISStream.io 연동 완전 제거, Datalastic 단일 소스로 통합.
-  - MMSI 충돌 문제(예: YC AZALEA)를 해결하기 위해 API 폴링 시 **IMO 번호**를 최우선으로 적용.
-  - UI에 국가, 선종, 목적지, ETA, GT 정보 추가. (VesselMarker `OFFSETS` export 버그 수정 및 안정화 진행)
+## 데이터베이스 스키마 (주요 모델)
+
+| 모델 | 설명 |
+|------|------|
+| `Vessel` | 선박 레지스트리 + 제원. `(account, mmsi)` unique |
+| `Position` | 시계열 위치. `(vesselId, timestamp DESC)` 인덱스. 90일 후 자동 삭제 |
+| `ShippingLane` | 표준 항로. `coordinates: Json` (`[lon, lat]` GeoJSON 순서) |
+| `ZoneEvent` | War Risk Zone 진입/이탈 이벤트 |
+| `Port` | 항구 DB (ETA 패널 항구 검색) |
+| `Account` | 멀티 어카운트 (role, 선박 수 제한) |
+| `SystemConfig` | 동적 설정 (e.g. `poll_cron` cron 표현식) |
+| `ApiUsage` | Datalastic 크레딧 사용량 로그 |
+| `Incident` | War Risk 사건 데이터 |
+| `SharedView` | 공유 링크 토큰 |
+
+---
+
+## 폴링 스케줄 동적 변경
+
+Admin 대시보드에서 `poll_cron` 값을 변경하면 재시작 없이 즉시 반영됩니다.  
+기본값: `0 4,6,8,11,15,23 * * *` (UTC 기준, KST +9)
+
+---
+
+## 좌표계 주의사항
+
+- DB / Turf.js / GeoJSON: `[lon, lat]`
+- React-Leaflet / 화면 표시: `[lat, lon]`
+- `etaCalc.js` 변환: `turf.point([pos.lon, pos.lat])`

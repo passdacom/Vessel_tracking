@@ -1,324 +1,66 @@
-# 코드 스타일 리뷰
+# 코드 스타일 리뷰 — ShippingLanes 컴포넌트 + lanes.js 라우터
 
-## 리뷰 개요
-- **대상 언어**: JavaScript (Node.js/Express 백엔드 + React 18 프론트엔드)
-- **적용 스타일 가이드**: Airbnb JavaScript Style Guide, React 공식 가이드
-- **파일 수**: 13 (백엔드) + 25 (프론트엔드) = 38개
-- **총 발견 수**: 🔴 4 / 🟡 9 / 🟢 6
-
----
-
-## 발견 사항
-
-### 🔴 필수 수정
-
-**1. [datalasticPoller.js:116–196 / 200–308] — 코드 중복 (핵심)**
-
-`pollPositions()`와 `forceUpdate()` 내부 루프 본문이 90% 동일하다. API 호출 → 좌표 파싱 → 스푸핑 탐지 → upsert → geofence 검사 → onPosition 브로드캐스트까지 동일한 30줄 블록이 두 곳에 복사되어 있다. 한쪽을 수정하면 다른 쪽도 반드시 수정해야 하고, 실제로 변수명(`prevPos` vs `prevPosF`, `suspicious` vs `susp`, `impliedSpeed` vs `ispd`, `reason` vs `sreason`)이 이미 불일치하는 상태다.
-
-- 현재:
-  ```js
-  // pollPositions 내부
-  const { suspicious, impliedSpeed, reason } = checkSpoofing(prevPos, ...);
-
-  // forceUpdate 내부 (동일 로직, 다른 변수명)
-  const { suspicious: susp, impliedSpeed: ispd, reason: sreason } = checkSpoofing(prevPosF, ...);
-  ```
-- 제안:
-  ```js
-  // 공통 함수로 추출
-  async function processVesselData(prisma, v, d, logger, onPosition, onZoneEvent) {
-    const lat = parseFloat(d.lat);
-    const lon = parseFloat(d.lon);
-    if (!lat && !lon) return null;
-
-    const cog = parseFloat(d.course) || null;
-    const sog = parseFloat(d.speed) || null;
-    const heading = d.heading != null && d.heading !== 511 ? parseInt(d.heading) : null;
-    const navStatus = d.navigation_status || null;
-    const destination = d.destination || null;
-    const eta = d.eta_UTC ? new Date(d.eta_UTC) : null;
-    const timestamp = d.last_position_epoch ? new Date(d.last_position_epoch * 1000) : new Date();
-
-    if (d.name && !v.name) {
-      await prisma.vessel.update({ where: { id: v.id }, data: { name: d.name } });
-    }
-
-    const prevPos = await prisma.position.findFirst({
-      where: { vesselId: v.id, suspicious: false },
-      orderBy: { timestamp: 'desc' },
-      select: { lat: true, lon: true, timestamp: true },
-    });
-    const { suspicious, impliedSpeed, reason } = checkSpoofing(prevPos, lat, lon, timestamp);
-
-    if (suspicious && logger) logger(`[Spoofing] ⚠ ${v.mmsi} 스푸핑 의심: ${reason}`);
-
-    const position = await prisma.position.upsert({
-      where: { vesselId_timestamp: { vesselId: v.id, timestamp } },
-      create: { vesselId: v.id, lat, lon, cog, sog, heading, navStatus, destination, eta, timestamp, suspicious, impliedSpeed, spoofReason: reason },
-      update: {},
-    });
-
-    if (!suspicious) {
-      const zoneEvents = await geofenceChecker.detectAndSave(prisma, v, position).catch(() => []);
-      if (zoneEvents.length > 0 && onZoneEvent) {
-        for (const ev of zoneEvents) onZoneEvent({ ...ev, vesselName: d.name || v.alias || v.name || v.mmsi, account: v.account });
-      }
-      const currentZones = geofenceChecker.getCurrentZones(v.id);
-      onPosition({ vesselId: v.id, mmsi: v.mmsi, name: d.name || v.name || v.alias, ...position, currentZones });
-    }
-
-    return position;
-  }
-  ```
-- 이유: 중복 코드는 버그 유발의 가장 큰 원인이며, 이미 변수명 불일치(`susp`/`suspicious`, `ispd`/`impliedSpeed`)로 혼란이 발생하고 있다.
-- 자동 수정: 불가 (ESLint `no-duplicate-code` 규칙으로 감지는 가능)
+**검토 일시**: 2026-04-19
+**검토 파일**:
+- `frontend/src/components/ShippingLanes/LaneEditor.jsx`
+- `frontend/src/components/ShippingLanes/LaneList.jsx`
+- `frontend/src/components/ShippingLanes/LaneManager.jsx`
+- `backend/src/routes/lanes.js`
 
 ---
 
-**2. [App.jsx:151] — 보안: 평문 비밀번호 localStorage 저장**
+## 이슈 목록
 
-- 현재:
-  ```js
-  localStorage.setItem("vessel_auth", pw);
-  ```
-- 제안:
-  ```js
-  // Bearer 토큰 방식: 서버 로그인 응답에서 서명된 토큰 발급 후 저장
-  // 단기 대안: 비밀번호 대신 서버가 반환하는 세션 ID를 저장
-  ```
-- 이유: `vessel_auth` 키에 평문 비밀번호가 저장되며, 이 값이 그대로 WebSocket URL 쿼리 파라미터(`?token=`)로 전달된다(`wsUrl` 구성 참고). 네트워크 로그, 브라우저 히스토리, 서버 액세스 로그에 비밀번호가 노출된다.
-- 자동 수정: 불가
-
----
-
-**3. [datalasticPoller.js:133] — 좌표 0,0 처리 버그**
-
-- 현재:
-  ```js
-  if (!lat && !lon) continue;
-  ```
-- 제안:
-  ```js
-  if (isNaN(lat) || isNaN(lon)) continue;
-  ```
-- 이유: `parseFloat("0")` 은 `0`이고, `!0`은 `true`다. 위도 0 또는 경도 0은 유효한 좌표(적도/본초 자오선)이지만 이 조건으로 인해 건너뛰어진다. `forceUpdate` 내 동일한 라인(236)도 같은 문제를 가진다.
-- 자동 수정: 불가
+| # | 파일:라인 | 설명 | 심각도 |
+|---|-----------|------|--------|
+| 1 | `LaneList.jsx:151` | `{!showAll && lanes.some((l) => !l.active) ? "" : ""}` — 양쪽 분기가 모두 빈 문자열을 반환하는 삼항 연산자. 어떤 조건에서도 아무것도 렌더링하지 않으므로 완전한 dead code. 비활성 항로 수를 표시하려는 의도였을 가능성이 높으나 구현이 누락된 채 방치됨. 삭제하거나 의도를 반영한 콘텐츠로 교체해야 한다. | high |
+| 2 | `LaneEditor.jsx:161-164` | `handleImport`에서 `setImporting(false)`가 `try/catch` 이후에 위치. `catch` 내부에서 `return`이 없어 현재는 동작하지만, 향후 조기 리턴 추가 시 `setImporting`이 호출되지 않아 로딩 상태가 영원히 남는 버그를 유발. `finally { setImporting(false) }` 패턴 사용 권장. `handleSave`(L193-195, `setSaving(false)`)도 동일 문제. | medium |
+| 3 | `LaneEditor.jsx:371-411` | `waypoints.map((wp, idx)`에서 `key={`wp-${idx}`}` 사용. 배열 인덱스를 key로 사용하는 것은 React에서 지양하는 패턴으로, 웨이포인트 중간 삭제/삽입 시 컴포넌트 재사용 오류를 유발할 수 있다. 좌표 기반 식별자(`wp-${wp[0]}-${wp[1]}`) 또는 삽입 시 UUID를 부여하는 방식 권장. | medium |
+| 4 | `LaneManager.jsx:33-37` | `handleSaved` 함수 본문이 `handleEditorClose`(L28-31)와 완전히 동일(`setEditingLane(null); setView("list")`). 명백한 DRY 위반. 공통 함수 `returnToList`로 추출하거나 `handleSaved`를 `handleEditorClose`로 대체 권장. | medium |
+| 5 | `lanes.js:54` | `if (!id)` — `parseInt`가 `NaN`을 반환하면 falsy이므로 동작하지만, `id === 0`도 falsy로 걸러진다. `0`이 유효한 ID는 아니지만 의도가 불명확. `isNaN(id) \|\| id <= 0` 조건이 더 명시적이고 안전. `lanes.js:107`, `157`도 동일 패턴. | medium |
+| 6 | `LaneEditor.jsx:14` | `makeWpIcon` 내 `isMoved` 변수 선언 후 한 줄만 사용. 변수명 `isMoved`는 과거형처럼 읽혀 "이동된 상태"와 "이동 모드 활성화" 의미가 혼동될 수 있다. 제거하고 `mode === "move"`를 인라인으로 쓰거나, `isMoving`으로 이름 변경 권장. | low |
+| 7 | `LaneEditor.jsx:161, 191` | `catch (e)` 블록 파라미터 이름이 `e`. 동일 파일에서 일관되게 `e`를 사용하므로 파일 내 일관성은 있으나, `LaneList.jsx:50,68`에서는 파라미터 없는 `catch {}` 형태를 사용하여 프로젝트 내 불일치. 한 가지 스타일로 통일 필요(`catch (err)` 권장). | low |
+| 8 | `LaneEditor.jsx:169-170` | `handleSave` 내 두 개의 guard 문이 같은 줄에 `{ setError(...); return; }` 인라인 형태로 작성됨. 파일 전체의 나머지 제어 흐름 코드가 여러 줄 블록 스타일인데 이 부분만 인라인 형태로 스타일 불일치. | low |
+| 9 | `LaneEditor.jsx:199` | `style={{ zIndex: 500 }}` 인라인 스타일. 프로젝트 전반이 Tailwind 기반인데 `zIndex`만 인라인 처리됨. `className`에 `z-[500]` arbitrary value로 통일 권장. `LaneEditor.jsx:419`(`zIndex: 400`)도 동일. | low |
+| 10 | `LaneEditor.jsx:217` | 모드 정의 배열 내 정렬용 다중 공백 사용(`"add",    label:`). 탭 정렬 스타일은 Prettier/ESLint와 충돌하고 diff를 오염시킨다. 단일 공백으로 통일 권장. | low |
+| 11 | `LaneEditor.jsx:289` | `style={{ minWidth: 160 }}` 인라인 스타일. `min-w-40` Tailwind 클래스로 대체 가능하여 다른 요소들과 스타일 관리 방식 통일. | low |
+| 12 | `LaneList.jsx:35` | `useEffect(() => { fetchLanes(); }, [fetchLanes])` 가 한 줄로 압축. 파일 내 다른 `useEffect` 호출이 여러 줄 블록 스타일이므로 스타일 불일치. 사소하지만 일관성 저하. | low |
+| 13 | `LaneList.jsx:102` | `onClick={() => onNew()}` — 불필요한 람다 래퍼. `onClick={onNew}`로 직접 전달 가능. `LaneList.jsx:141`도 동일. | low |
+| 14 | `LaneManager.jsx:34` | `handleSaved` 내 주석 `// 저장 후 목록으로 돌아가기`는 함수명으로 이미 충분히 전달됨. 반면 `handleEditorClose`는 주석이 없어 비대칭. 불필요한 주석은 제거하거나 모든 함수에 일관되게 추가. | low |
+| 15 | `lanes.js:64` | 주석 `// ── 이하 admin only`만 있고, 그 위의 GET 엔드포인트 두 개가 인증 사용자라면 누구나 접근 가능하다는 사실이 명시되지 않음. `// ── GET / GET /:id — 인증 사용자 전체 허용 (adminGuard 미적용)` 주석으로 의도를 명확히 표시 권장. | low |
+| 16 | `lanes.js:95, 145, 164` | logger 메시지에서 한국어(`[lanes] 생성:`, `[lanes] 수정:`, `[lanes] 삭제:`)와 HTTP 응답 에러 메시지(`"Internal server error"`, `"Lane not found"`)가 한국어/영어로 이원화됨. 의도된 것이라면 주석으로 명시 권장. | low |
+| 17 | `lanes.js:141` | `updatedAt: new Date()`를 Prisma `update` data에 명시적으로 주입. Prisma 스키마에 `@updatedAt`이 설정되어 있다면 자동 갱신되므로 중복. 스키마 확인 후 불필요하면 제거 권장. | low |
+| 18 | `lanes.js:148, 167` | Prisma 에러 코드 `P2025` catch 처리가 있지만, 해당 블록 이전에 이미 `findUnique` + 404 반환 경로가 존재(L110, L161). 두 경로가 모두 존재하여 역할이 중복. race condition 방어 목적이라면 `// race condition 방어` 주석으로 명시 권장. | low |
 
 ---
 
-**4. [accounts.js:17] — 보안: 평문 비밀번호를 Map 키로 캐싱**
+## 전반적 평가
 
-- 현재:
-  ```js
-  cachedAccounts.set(row.password, { name: row.name, role: row.role });
-  ```
-- 제안: 서버 측에서 bcrypt 해시 비교 방식으로 전환. 단기 대안으로 캐시를 비밀번호 → 계정 매핑 대신 계정명 → 해시 매핑으로 변경.
-- 이유: 인메모리에 모든 계정의 평문 비밀번호가 상주한다. 메모리 덤프, 디버거 연결 등으로 전체 계정 자격증명이 노출될 수 있다.
-- 자동 수정: 불가
+### 긍정적인 부분
 
----
+- **컴포넌트 책임 분리가 명확하다.** `LaneManager`(뷰 상태 라우팅) → `LaneList`(목록 CRUD) → `LaneEditor`(지도 편집) 계층 구조가 단방향으로 정리되어 있고, 각 컴포넌트의 역할이 명확하게 구분된다.
+- **한글 주석이 풍부하고 도메인 맥락 파악이 용이하다.** 함수, 섹션, JSX 구조 구분선이 한글로 설명되어 있어 코드베이스에 처음 합류하는 개발자도 빠르게 이해할 수 있다.
+- **camelCase 네이밍이 React 컨벤션을 일관되게 따른다.** 이벤트 핸들러(`handleAdd`, `handleDelete`, `handleToggleActive`), 상태 변수(`saving`, `importing`, `refTrack`), props 이름 모두 명확하고 일관적이다.
+- **백엔드 유효성 검사 구조가 잘 분리되어 있다.** `validateCoordinates`를 독립 함수로 추출하고, `adminGuard`를 `router.use()`로 미들웨어 레벨에 적용한 패턴이 명확하고 확장 가능하다.
+- **`LaneManager.jsx` 전체 구조가 간결하다.** 59줄의 짧은 파일에서 뷰 상태 전환 로직만 담당하며, JSDoc 스타일 Props 설명이 인터페이스를 명확히 기술한다.
 
-### 🟡 권장 수정
+### 개선이 필요한 부분
 
-**1. [datalasticPoller.js:84] — 에러 핸들링: 빈 catch 블록 남용**
-
-- 현재:
-  ```js
-  try { await prisma.apiUsage.create({ ... }); } catch {}
-  ```
-- 제안:
-  ```js
-  try {
-    await prisma.apiUsage.create({ data: { endpoint: "vessel_info", credits: 1, account: null } });
-  } catch (e) {
-    console.warn("[Datalastic] apiUsage 기록 실패:", e.message);
-  }
-  ```
-- 이유: 완전히 빈 catch 블록은 DB 연결 오류, 스키마 불일치 등 실제 문제를 조용히 삼킨다. 최소한 warn 로깅이 있어야 디버깅이 가능하다. `pollPositions`, `forceUpdate`, `vessels.js` 등 여러 곳에서 동일 패턴이 반복된다.
-- 자동 수정: ESLint `no-empty` 규칙 (단, catch 블록은 `allowEmptyCatch` 옵션 비활성화 필요)
+- **Dead code (이슈 #1)** 가 가장 긴급한 문제다. `LaneList.jsx:151`의 항상-빈-문자열 삼항 연산자는 미완성 기능으로 보이며, 의도를 확인하고 즉시 정리해야 한다.
+- **`finally` 미사용으로 인한 상태 누락 위험 (이슈 #2)** 은 현재는 동작하지만 유지보수 중 버그를 유발할 수 있는 구조적 결함이다. `handleImport`와 `handleSave` 양쪽 모두 `finally` 패턴으로 전환을 권장한다.
+- **인덱스 key 사용 (이슈 #3)** 은 웨이포인트 중간 삽입/삭제 기능이 핵심인 LaneEditor 특성상 렌더링 문제로 이어질 가능성이 있다. 조기에 수정하는 것이 좋다.
+- **`LaneManager`의 함수 중복 (이슈 #4)** 은 소규모지만 명백한 DRY 위반으로, 공통 함수 추출로 즉시 해결 가능하다.
+- **인라인 스타일 혼용 (이슈 #9, #11)** 은 Tailwind arbitrary value 클래스로 통일하면 스타일 관리가 일원화된다.
 
 ---
 
-**2. [App.jsx:460–472] — 함수 배치 순서 비일관성**
+## 요약
 
-`handleSidebarResize`가 조건부 반환(`if (!isAuthed)`, `if (accountRole === "admin")`) 이후에 선언되어 있다. React 컴포넌트에서 훅이 아닌 일반 함수는 일관된 위치(상단 또는 하단)에 몰아두는 것이 관례다. 이 함수는 다른 핸들러들과 달리 JSX 반환문 바로 위에 위치해 흐름을 끊는다.
+| 심각도 | 건수 |
+|--------|------|
+| high   | 1    |
+| medium | 4    |
+| low    | 13   |
+| **합계** | **18** |
 
----
-
-**3. [App.jsx:565] — 한 줄에 지나치게 긴 JSX 속성 (가독성)**
-
-- 현재:
-  ```jsx
-  <AddVesselModal ... customGroups={[...new Set([...customGroups, ...vessels.map(v => v.companyType).filter(Boolean)])].filter(g => g !== '자사간사' && g !== '타사간사')} ... />
-  ```
-- 제안: 인라인 계산 로직을 `useMemo` 또는 변수로 분리.
-  ```js
-  const availableCustomGroups = useMemo(() =>
-    [...new Set([...customGroups, ...vessels.map(v => v.companyType).filter(Boolean)])]
-      .filter(g => g !== '자사간사' && g !== '타사간사'),
-    [customGroups, vessels]
-  );
-  ```
-- 자동 수정: Prettier (줄 길이 제한 적용 시 강제 줄바꿈)
-
----
-
-**4. [index.js:25, 30] — 매직 넘버: rate limit 설정**
-
-- 현재:
-  ```js
-  windowMs: 15 * 60 * 1000, max: 5
-  windowMs: 15 * 60 * 1000, max: 10
-  ```
-- 제안:
-  ```js
-  const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
-  const FORCE_UPDATE_MAX_REQUESTS = 5;
-  const HISTORY_MAX_REQUESTS = 10;
-  ```
-- 이유: 동일한 window 값이 두 곳에 반복되며, 수정 시 모두 찾아야 한다.
-- 자동 수정: ESLint `no-magic-numbers`
-
----
-
-**5. [App.jsx:43] — 매직 넘버: stale 판단 시간**
-
-- 현재:
-  ```js
-  const stale = !pos || Date.now() - new Date(pos.timestamp) > 2 * 60 * 60 * 1000;
-  ```
-  동일한 `2 * 60 * 60 * 1000` 리터럴이 `Sidebar/index.jsx:58`에도 반복된다.
-- 제안: 공유 상수 파일(`constants.js`)에 `STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000` 정의.
-- 자동 수정: ESLint `no-magic-numbers`
-
----
-
-**6. [wsServer.js:33] — `broadcast` 메서드의 WebSocket.OPEN 하드코딩**
-
-- 현재:
-  ```js
-  if (client.readyState === 1) client.send(msg);
-  ```
-- 제안:
-  ```js
-  if (client.readyState === WebSocket.OPEN) client.send(msg);
-  ```
-- 이유: `1`은 `WebSocket.OPEN` 상수다. 명시적 상수 사용이 의도를 명확히 한다. `broadcastToAccount`도 동일 패턴.
-- 자동 수정: 불가
-
----
-
-**7. [admin.js:74] — 매직 넘버: API 크레딧 한도**
-
-- 현재:
-  ```js
-  monthlyLimit: 20000,
-  monthlyRemaining: Math.max(0, 20000 - totalUsed),
-  ```
-- 제안:
-  ```js
-  const MONTHLY_API_LIMIT = parseInt(process.env.API_MONTHLY_LIMIT || "20000", 10);
-  ```
-- 이유: 같은 `20000` 값이 두 줄에 사용되며 환경에 따라 다를 수 있는 설정이다.
-
----
-
-**8. [Map/index.jsx:1–68] — `computeDynamicOffsets` 함수가 컴포넌트 파일에 위치**
-
-지도 레이블 배치 알고리즘(약 60줄)이 React 컴포넌트 파일에 직접 포함되어 있다. 순수 계산 함수이므로 별도 유틸 파일(`utils/labelOffsets.js`)로 분리하면 테스트 가능성과 가독성이 향상된다.
-
----
-
-**9. [geofenceChecker.js:55–63] — `computeBbox`의 중첩 함수 `visit`**
-
-재귀 함수 `visit`이 `computeBbox` 내부에 선언되어 있다. 외부에서 재사용 가능한 로직이 아니므로 구조 자체는 문제없으나, 함수 내부 `if/else` 분기에 중괄호가 없어 가독성이 떨어진다.
-
-- 현재:
-  ```js
-  if (c[0] < minX) minX = c[0]; if (c[0] > maxX) maxX = c[0];
-  ```
-- 제안: 각 조건에 줄바꿈 또는 중괄호 추가.
-- 자동 수정: Prettier
-
----
-
-### 🟢 참고 사항
-
-**1. [datalasticPoller.js:315] — cron 표현식 주석**
-
-`// UTC 시간 기준` 주석이 코드 바로 옆에 있어 실제 KST 시간과의 관계를 명시한다. 잘 된 부분이나, 주석이 코드 라인과 같은 줄에 있어 길이가 길다. 별도 줄로 분리하면 더 읽기 좋다.
-
-**2. [vessels.js:28–32] — `logApiUsage` 헬퍼 함수 분리**
-
-API 사용량 기록 로직이 `logApiUsage`로 명확히 분리되어 있다. 단일 책임 원칙을 잘 따른 패턴이다.
-
-**3. [Sidebar/index.jsx] — 상수(`TRACK_QUICK`, `TRACK_ALL`)를 컴포넌트 외부로 분리**
-
-트랙 시간 옵션 상수를 모듈 최상단에 배치한 것은 불필요한 리렌더링을 방지하는 올바른 패턴이다.
-
-**4. [cleanup.js] — 파일 전체**
-
-`THIRTY_DAYS_MS`, `INTERVAL_MS` 상수로 매직 넘버를 제거하고, 함수가 간결하게 단일 책임을 수행한다. 프로젝트 내 가장 깔끔하게 작성된 파일이다.
-
-**5. [geofenceChecker.js] — JSDoc 주석 품질**
-
-`checkSpoofing`, `detectAndSave`, `initState` 등 주요 함수에 JSDoc 형태의 주석이 잘 달려 있다.
-
-**6. [vessels.js:5–41] — 헬퍼 함수 상단 배치**
-
-`parseId`, `validatePositionFields`, `logApiUsage`, `checkVesselAccess`가 라우터 정의 전 상단에 몰려 있어 파일 구조를 파악하기 쉽다.
-
----
-
-## 반복 패턴
-
-| 패턴 | 발생 위치 | 발생 횟수 | 자동 수정 | 권장 규칙 |
-|------|----------|---------|----------|----------|
-| 빈 catch 블록 | datalasticPoller.js, vessels.js, Sidebar/index.jsx | 6+ | 부분 (ESLint) | `no-empty` (`allowEmptyCatch: false`) |
-| 매직 넘버 (`2 * 60 * 60 * 1000`) | App.jsx, Sidebar/index.jsx | 2 | ESLint | `no-magic-numbers` |
-| 매직 넘버 (`20000`, `15 * 60 * 1000`) | admin.js, index.js | 3 | ESLint | `no-magic-numbers` |
-| `readyState === 1` 하드코딩 | wsServer.js | 2 | 불가 | 코드 리뷰 체크리스트 |
-| `!lat && !lon` 좌표 0 버그 | datalasticPoller.js | 2 | 불가 | 단위 테스트 |
-| 인라인 복잡 표현식 (JSX props) | App.jsx | 2 | Prettier | `max-len: 100` |
-
----
-
-## 자동화 권장 설정
-
-### .eslintrc.cjs (백엔드/프론트 공통)
-```js
-module.exports = {
-  rules: {
-    "no-empty": ["error", { "allowEmptyCatch": false }],
-    "no-magic-numbers": ["warn", {
-      "ignore": [0, 1, -1, 2, 10, 100],
-      "ignoreArrayIndexes": true,
-      "enforceConst": true
-    }],
-    "max-len": ["warn", { "code": 120, "ignoreStrings": true, "ignoreTemplateLiterals": true }],
-    "no-unused-vars": "error",
-  }
-};
-```
-
-### .prettierrc
-```json
-{
-  "printWidth": 100,
-  "singleQuote": false,
-  "semi": true,
-  "trailingComma": "es5",
-  "tabWidth": 2
-}
-```
-
----
-
-## 칭찬할 점
-
-1. **`cleanup.js`**: 상수명이 명확하고(`THIRTY_DAYS_MS`, `INTERVAL_MS`), 함수가 단일 책임을 깔끔하게 수행한다. 프로젝트 내 가장 이상적인 스타일로 작성된 파일이다.
-
-2. **`vessels.js`의 헬퍼 함수 분리**: `parseId`, `validatePositionFields`, `logApiUsage`, `checkVesselAccess` 4개의 유틸 함수를 라우터 상단에 명시적으로 분리하여, 라우터 핸들러 자체가 비즈니스 로직에만 집중한다. 단일 책임 원칙을 잘 따른 구조다.
-
-3. **`geofenceChecker.js`의 알고리즘 구현**: Ray Casting 기반 포인트-인-폴리곤 구현이 바운딩 박스 사전 필터(`bbox`)와 함께 성능 최적화까지 고려되어 있다. 외부 의존성 없이 구현한 점도 배포 안정성에 기여한다.
+전체적으로 코드 품질은 양호하며 치명적 결함은 없다. `high` 1건(dead code)을 즉시 처리하고, `medium` 4건(finally 패턴, 인덱스 key, DRY 위반, ID 유효성 검사)을 다음 스프린트 내에 정리하는 것을 권장한다. `low` 항목들은 팀 컨벤션 논의 후 일괄 적용하면 된다.

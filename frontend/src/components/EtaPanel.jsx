@@ -308,6 +308,12 @@ export default function EtaPanel({
                   <span>항로 구간</span>
                   <span className="tabular-nums">{result.laneSegDist} nm</span>
                 </div>
+                {result.transferDist > 0 && (
+                  <div className="flex justify-between text-gray-500">
+                    <span>항로 연결</span>
+                    <span className="tabular-nums">{result.transferDist} nm</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-gray-500">
                   <span>항로 이탈 → 목적지</span>
                   <span className="tabular-nums">{result.distDToSnap} nm</span>
@@ -336,9 +342,21 @@ export default function EtaPanel({
                 <span>⚠</span><span>등록된 항로 없음 — 직선거리 계산</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-start gap-1.5 min-w-0">
                 <span className="inline-block w-3 h-1.5 rounded flex-shrink-0" style={{ background: result.laneColor }} />
-                <span className="text-xs text-gray-400 truncate">항로: {result.laneName}</span>
+                <div className="text-xs text-gray-400 min-w-0">
+                  <div className="truncate">항로: {result.laneName}</div>
+                  {Array.isArray(result.routeSegments) && result.routeSegments.filter(s => s.type === "lane").length > 1 && (
+                    <div className="mt-1 space-y-0.5">
+                      {result.routeSegments.filter(s => s.type === "lane").map((segment, idx) => (
+                        <div key={`${segment.laneId}-${idx}`} className="flex justify-between gap-2 text-gray-500">
+                          <span className="truncate">{segment.laneName}</span>
+                          <span className="tabular-nums flex-shrink-0">{segment.distanceNm} nm</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

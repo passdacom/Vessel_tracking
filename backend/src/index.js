@@ -21,6 +21,10 @@ const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Nginx reverse proxy passes X-Forwarded-For; express-rate-limit needs this
+// to identify real client IPs without emitting validation errors.
+app.set("trust proxy", 1);
+
 // ── CORS ──────────────────────────────────────────────────────────────────────
 // ALLOWED_ORIGINS 환경변수로 허용 오리진 지정, 없으면 전체 허용(하위 호환)
 const allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -113,6 +117,7 @@ app.use(async (req, res, next) => {
   if (req.path.startsWith("/api/shares/view/")) return next();
   if (req.path === "/api/auth") return next();
   if (req.path === "/api/account/change-password") return next();
+  if (req.path === "/api/health") return next();
   try {
     const rawToken = req.headers.authorization?.split(" ")[1];
     const account = rawToken ? await authenticate(prisma, rawToken) : null;
