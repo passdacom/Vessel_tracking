@@ -63,7 +63,7 @@ function computeBbox(geometry) {
 }
 
 // ─── GeofenceChecker ────────────────────────────────────────────────────────
-class GeofenceChecker {
+export class GeofenceChecker {
   constructor() {
     this.zones = [];   // { name, geometry, bbox }
     this.loaded = false;
@@ -131,14 +131,15 @@ class GeofenceChecker {
    * - 이미 HRA 안에 있지만 DB에 entry 기록이 없는 선박은 entry 이벤트 복원
    *   (last zoneEvent가 없거나 exit인 경우만 생성 → 중복 방지)
    */
-  async initState(prisma) {
+  async initState(prisma, onZoneEvent = null) {
+    let vesselCount = 0;
+    let restoredCount = 0;
     try {
       const vessels = await prisma.vessel.findMany({
         where: { active: true },
-        select: { id: true, name: true, alias: true, mmsi: true },
+        select: { id: true, name: true, alias: true, mmsi: true, account: true },
       });
-
-      let restoredCount = 0;
+      vesselCount = vessels.length;
 
       for (const v of vessels) {
         const lastPos = await prisma.position.findFirst({
@@ -164,7 +165,7 @@ class GeofenceChecker {
           });
 
           if (!lastEvent || lastEvent.eventType === "exit") {
-            await prisma.zoneEvent.create({
+            const restoredEvent = await prisma.zoneEvent.create({
               data: {
                 vesselId: v.id,
                 zoneName,
@@ -177,13 +178,22 @@ class GeofenceChecker {
             restoredCount++;
             const displayName = v.alias || v.name || v.mmsi;
             console.log(`[Geofence] 📌 entry 복원: ${displayName} → ${zoneName}`);
+            if (onZoneEvent) {
+              try {
+                await onZoneEvent({ ...restoredEvent, vesselName: displayName, account: v.account });
+              } catch (callbackError) {
+                console.error("[Geofence] replay callback error:", callbackError.message);
+              }
+            }
           }
         }
       }
 
       console.log(`[Geofence] 🗺 State initialized for ${vessels.length} vessels (entry 복원: ${restoredCount}건)`);
+      return { vessels: vesselCount, restored: restoredCount };
     } catch (e) {
       console.error("[Geofence] initState error:", e.message);
+      return { vessels: vesselCount, restored: restoredCount, error: true };
     }
   }
 

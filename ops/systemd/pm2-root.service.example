@@ -1,0 +1,31 @@
+[Unit]
+Description=PM2 process manager for Vessel Tracking
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=forking
+User=root
+UMask=0077
+Environment=VESSEL_BACKEND_ENV_FILE=/etc/vessel-tracking/vessel-tracking.env
+Environment=PM2_HOME=/var/lib/vessel-tracking/pm2
+Environment=VESSEL_LOG_DIR=/var/log/vessel-tracking
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+LogsDirectory=vessel-tracking
+LogsDirectoryMode=0750
+PIDFile=/var/lib/vessel-tracking/pm2/pm2.pid
+ExecStart=/usr/bin/pm2 resurrect
+ExecReload=/usr/bin/pm2 reload vessel-backend --update-env
+ExecReload=/usr/bin/pm2 reload vessel-frontend --update-env
+ExecStop=/usr/bin/pm2 delete vessel-backend vessel-frontend
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=60
+TimeoutStopSec=30
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,6 @@
 export const AUTH_STORAGE_KEYS = [
   "vessel_token",
   "vessel_token_expires",
-  "vessel_auth",
-  "vessel_auth_expires",
   "vessel_account",
   "vessel_role",
 ];
@@ -16,7 +14,7 @@ export function clearAuthStorage(storage = globalThis.localStorage) {
 
 export function getStoredAuthToken(storage = globalThis.localStorage) {
   if (!storage) return "";
-  return storage.getItem("vessel_token") || storage.getItem("vessel_auth") || "";
+  return storage.getItem("vessel_token") || "";
 }
 
 export function createApiFetch({

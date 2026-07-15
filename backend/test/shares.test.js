@@ -3,12 +3,16 @@ import assert from "node:assert/strict";
 import express from "express";
 import sharesRoutes from "../src/routes/shares.js";
 
-function makePrisma(initialShares = []) {
+function makePrisma(initialShares = [], initialVessels = [
+  { id: 1, account: "kb" },
+  { id: 2, account: "kb" },
+  { id: 3, account: "kdgc" },
+]) {
   const rows = initialShares.map((row, idx) => ({
     id: idx + 1,
     token: row.token,
     label: row.label,
-    vesselIds: JSON.stringify(row.vesselIds),
+    vesselIds: row.rawVesselIds ?? JSON.stringify(row.vesselIds),
     createdBy: row.createdBy ?? null,
     createdAt: row.createdAt ?? new Date("2026-04-20T00:00:00.000Z"),
     expiresAt: row.expiresAt ?? null,
@@ -33,7 +37,7 @@ function makePrisma(initialShares = []) {
           label: data.label,
           vesselIds: data.vesselIds,
           createdBy: data.createdBy ?? null,
-          createdAt: new Date("2026-04-20T00:00:00.000Z"),
+          createdAt: new Date(),
           expiresAt: data.expiresAt ?? null,
         };
         rows.push(row);
@@ -54,15 +58,28 @@ function makePrisma(initialShares = []) {
       },
     },
     vessel: {
-      async findMany({ where }) {
-        return where.id.in.map((id) => ({
-          id,
-          mmsi: String(100000000 + id),
-          name: `Vessel ${id}`,
+      async findMany({ where, include, select }) {
+        let vessels = initialVessels.filter((vessel) => where.id.in.includes(vessel.id));
+        if (where.account !== undefined) {
+          vessels = vessels.filter((vessel) => vessel.account === where.account);
+        }
+        return vessels.map((vessel) => {
+          if (select) return { id: vessel.id };
+          const positions = include?.positions
+            ? (vessel.positions || []).filter((position) =>
+                position.timestamp >= include.positions.where.timestamp.gte &&
+                position.suspicious === include.positions.where.suspicious
+              )
+            : [];
+          return {
+          ...vessel,
+          mmsi: String(100000000 + vessel.id),
+          name: `Vessel ${vessel.id}`,
           alias: null,
           color: "#3b82f6",
-          positions: [],
-        }));
+          positions,
+        };
+        });
       },
     },
     _rows: rows,
@@ -102,6 +119,63 @@ test("user can create a share owned by their account", async () => {
     assert.equal(res.status, 200);
     assert.equal(body.createdBy, "kb");
     assert.equal(prisma._rows[0].createdBy, "kb");
+    assert.ok(new Date(body.expiresAt) > new Date(body.createdAt));
+  });
+});
+
+async function postShare(baseUrl, body) {
+  const response = await fetch(`${baseUrl}/api/shares`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return { response, body: await response.json() };
+}
+
+test("user share creation rejects all-foreign and mixed vessel ids atomically", async () => {
+  const prisma = makePrisma();
+  await withServer({ account: "kb", role: "user", prisma }, async (baseUrl) => {
+    for (const vesselIds of [[3], [1, 3]]) {
+      const { response } = await postShare(baseUrl, { label: "Foreign", vesselIds });
+      assert.equal(response.status, 403);
+    }
+    assert.equal(prisma._rows.length, 0);
+  });
+});
+
+test("share creation rejects duplicate and nonexistent vessel ids", async () => {
+  const prisma = makePrisma();
+  await withServer({ account: "kb", role: "user", prisma }, async (baseUrl) => {
+    assert.equal((await postShare(baseUrl, { label: "Duplicate", vesselIds: [1, 1] })).response.status, 400);
+    assert.equal((await postShare(baseUrl, { label: "Missing", vesselIds: [999] })).response.status, 403);
+    assert.equal(prisma._rows.length, 0);
+  });
+});
+
+test("admin can share existing vessels from multiple accounts but not nonexistent ids", async () => {
+  const prisma = makePrisma();
+  await withServer({ account: "admin", role: "admin", prisma }, async (baseUrl) => {
+    assert.equal((await postShare(baseUrl, { label: "Fleet", vesselIds: [1, 3] })).response.status, 200);
+    assert.equal((await postShare(baseUrl, { label: "Missing", vesselIds: [999] })).response.status, 400);
+    assert.equal(prisma._rows.length, 1);
+  });
+});
+
+test("share expiry is bounded", async () => {
+  const prisma = makePrisma();
+  await withServer({ account: "kb", role: "user", prisma }, async (baseUrl) => {
+    for (const expiresInHours of [0, -1, 721, "later"]) {
+      const { response } = await postShare(baseUrl, { label: "Expiry", vesselIds: [1], expiresInHours });
+      assert.equal(response.status, 400);
+    }
+    const { response, body } = await postShare(baseUrl, {
+      label: "One day",
+      vesselIds: [1],
+      expiresInHours: 24,
+    });
+    assert.equal(response.status, 200);
+    const durationHours = (new Date(body.expiresAt) - new Date(body.createdAt)) / 3_600_000;
+    assert.ok(durationHours > 23.9 && durationHours <= 24);
   });
 });
 
@@ -188,4 +262,55 @@ test("public share view remains unauthenticated", async () => {
   } finally {
     await new Promise((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }
+});
+
+test("public user share filters foreign legacy ids, suspicious positions, and excessive hours", async () => {
+  const now = new Date();
+  const prisma = makePrisma([
+    { token: "legacy-malformed", label: "Public", vesselIds: [1, 3], createdBy: "kb" },
+  ], [
+    {
+      id: 1,
+      account: "kb",
+      positions: [
+        { id: 1, timestamp: now, suspicious: false },
+        { id: 2, timestamp: now, suspicious: true },
+      ],
+    },
+    { id: 3, account: "kdgc", positions: [{ id: 3, timestamp: now, suspicious: false }] },
+  ]);
+
+  const app = express();
+  app.use(express.json());
+  app.use("/api/shares", sharesRoutes(prisma));
+  const server = app.listen(0);
+  try {
+    await new Promise((resolve) => server.once("listening", resolve));
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/shares/view/legacy-malformed?hours=999999`);
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.deepEqual(body.vessels.map((vessel) => vessel.id), [1]);
+    assert.deepEqual(body.vessels[0].positions.map((position) => position.id), [1]);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("malformed legacy vesselIds are controlled on both list and public paths", async () => {
+  const prisma = makePrisma([
+    { token: "broken", label: "Broken", rawVesselIds: "{not-json", createdBy: null },
+  ]);
+
+  await withServer({ account: "admin", role: "admin", prisma }, async (baseUrl) => {
+    const listResponse = await fetch(`${baseUrl}/api/shares`);
+    const listBody = await listResponse.json();
+    assert.equal(listResponse.status, 200);
+    assert.deepEqual(listBody[0].vesselIds, []);
+    assert.equal(listBody[0].invalidData, true);
+
+    const publicResponse = await fetch(`${baseUrl}/api/shares/view/broken`);
+    assert.equal(publicResponse.status, 404);
+    assert.deepEqual(await publicResponse.json(), { error: "Invalid or expired link" });
+  });
 });

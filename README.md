@@ -7,15 +7,19 @@
 ## 시스템 아키텍처
 
 ```
-브라우저
-  ↓ (포트 18789)
-Nginx (리버스 프록시)
-  ├── /api/*  →  vessel-backend  (Node.js/Express, 포트 3001)
-  └── /*      →  vessel-frontend (Vite dev server, 포트 5173)
+브라우저 / https://vessel.ttacom.net
+  ↓
+Nginx Proxy Manager / reverse proxy
+  ↓
+vessel-frontend (PM2, Node production static/proxy server, 포트 5173)
+  ├── 정적 React production build: frontend/dist
+  ├── /api/* → vessel-backend (Node.js/Express, 포트 3001)
+  └── /ws    → vessel-backend WebSocket proxy
 ```
 
 - **Backend**: Node.js (ESM), Express, Prisma ORM, PostgreSQL
-- **Frontend**: React 18, Vite, Tailwind CSS, React-Leaflet, Turf.js
+- **Frontend**: React 18, Vite build artifact, Tailwind CSS, React-Leaflet, Turf.js
+- **Frontend runtime**: `frontend/server.mjs` via PM2 (`NODE_ENV=production`)
 - **데이터 소스**: Datalastic API (IMO 우선, MMSI 폴백)
 
 ---
@@ -76,19 +80,36 @@ npm install
 npx prisma generate
 npm run dev
 
-# Frontend
+# Frontend 개발 서버
 cd frontend
 npm install
-npm run dev   # Vite dev server (포트 5173)
+npm run dev   # Vite dev server (개발용)
+
+# Frontend production build / local serve
+npm run build
+npm start     # Node static/proxy server (기본 포트 5173)
 ```
 
-### PM2로 운영 시
+### PM2 운영
 ```bash
-pm2 start ecosystem.config.cjs
-pm2 status
-pm2 logs vessel-backend
-pm2 logs vessel-frontend
+cd /root/.openclaw/workspace/Vessel_tracking
+./scripts/release.sh   # 기본값: side-effect-free dry-run
+
+# 전용 vessel PM2 daemon 상태/로그 확인
+PM2_HOME=/var/lib/vessel-tracking/pm2 pm2 status
+PM2_HOME=/var/lib/vessel-tracking/pm2 pm2 logs vessel-backend
+PM2_HOME=/var/lib/vessel-tracking/pm2 pm2 logs vessel-frontend
 ```
+
+실제 deploy, 최초 전용 PM2/systemd 이관, DB migration은 모두 Human Gate 대상입니다. 공유 `/root/.pm2`에서 수동 `pm2 start`, `reload all`, `delete all`, `pm2 kill`을 실행하지 마세요.
+
+운영 smoke:
+
+```bash
+/root/.openclaw/workspace/Vessel_tracking/scripts/production-smoke.sh
+```
+
+자세한 운영/rollback 절차는 `docs/production-runbook.md`를 참고하세요.
 
 ---
 

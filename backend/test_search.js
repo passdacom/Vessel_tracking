@@ -1,7 +1,8 @@
 import https from 'https';
 
 function apiCall(endpoint, params) {
-  const apiKey = '33ceea11-c650-45ae-a459-a8941203241b'; // from .env
+  const apiKey = process.env.DATALASTIC_API_KEY;
+  if (!apiKey) throw new Error('DATALASTIC_API_KEY is required');
   const qs = new URLSearchParams({ 'api-key': apiKey, ...params }).toString();
   const url = `https://api.datalastic.com/api/v0/${endpoint}?${qs}`;
   return new Promise(resolve => {

@@ -12,8 +12,9 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 프로젝트 루트의 logs/ 폴더
-const LOG_DIR = path.resolve(__dirname, "../../../logs/app");
+// 운영에서는 systemd/PM2와 공유하는 로그 루트, 개발에서는 프로젝트 logs/ 폴더
+const LOG_ROOT = process.env.VESSEL_LOG_DIR || path.resolve(__dirname, "../../../logs");
+const LOG_DIR = path.join(LOG_ROOT, "app");
 const MAX_LINES = 5000; // 파일당 최대 라인 수
 
 // 내부 상태

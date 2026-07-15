@@ -1,7 +1,7 @@
 /**
  * In-memory 세션 관리
  * - 로그인 시 UUID 토큰 발급
- * - 서버 재시작 시 세션 초기화 → 비밀번호 폴백(accounts.js)으로 무중단 유지
+ * - 서버 재시작 시 세션 초기화 → 사용자는 다시 로그인해야 함
  */
 
 import { randomUUID } from "crypto";
@@ -37,8 +37,8 @@ export function invalidateAccount(accountName) {
   if (count > 0) logger.info(`[Sessions] ${accountName} 세션 ${count}개 무효화`);
 }
 
-// 매 시간 만료 세션 정리
-setInterval(() => {
+// 매 시간 만료 세션 정리 (테스트/정상 종료를 막지 않음)
+const cleanupTimer = setInterval(() => {
   const now = Date.now();
   let removed = 0;
   for (const [token, s] of sessions) {
@@ -46,3 +46,4 @@ setInterval(() => {
   }
   if (removed > 0) logger.debug(`[Sessions] 만료 세션 ${removed}개 정리`);
 }, 60 * 60 * 1000);
+cleanupTimer.unref();

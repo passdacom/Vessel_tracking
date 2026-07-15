@@ -3,6 +3,7 @@ import { VESSEL_COLORS } from "../utils/colors.js";
 import { apiCall, checkSpoofing } from "../services/datalasticPoller.js";
 import { geofenceChecker } from "../services/geofenceChecker.js";
 import { logger } from "../utils/logger.js";
+import { authenticateCredentials } from "../accounts.js";
 
 /** parseInt 실패(NaN, 음수) 시 null 반환 */
 function parseId(idStr) {
@@ -33,6 +34,24 @@ async function logApiUsage(prisma, endpoint, credits, account) {
   } catch { /* non-critical */ }
 }
 
+function normalizeDatalasticResult(rawResult) {
+  if (rawResult && typeof rawResult.attempted === "boolean") {
+    const attempted = rawResult.attempted;
+    return {
+      attempted,
+      attempts: attempted ? Math.max(1, Number(rawResult.attempts) || 1) : 0,
+      response: attempted ? rawResult.response ?? null : null,
+      error: rawResult.error ?? null,
+    };
+  }
+  return {
+    attempted: rawResult != null,
+    attempts: rawResult == null ? 0 : 1,
+    response: rawResult ?? null,
+    error: rawResult == null ? "transport_unavailable" : null,
+  };
+}
+
 /** 현재 계정이 해당 선박에 접근 가능한지 확인 */
 async function checkVesselAccess(prisma, vesselId, req) {
   const vessel = await prisma.vessel.findUnique({ where: { id: vesselId } });
@@ -52,11 +71,8 @@ async function requireHistoryPassword(prisma, req, res) {
     return false;
   }
 
-  const adminAccount = await prisma.account.findUnique({
-    where: { name: "admin" },
-    select: { password: true },
-  });
-  if (!adminAccount || adminAccount.password !== password) {
+  const adminAccount = await authenticateCredentials(prisma, "admin", password);
+  if (!adminAccount || adminAccount.role !== "admin") {
     res.status(401).json({ error: "히스토리 조회 비밀번호가 올바르지 않습니다." });
     return false;
   }
@@ -64,8 +80,22 @@ async function requireHistoryPassword(prisma, req, res) {
   return true;
 }
 
-export default function vesselRoutes(prisma) {
+export default function vesselRoutes(prisma, { apiCallFn = apiCall } = {}) {
   const router = Router();
+
+  async function requestDatalastic(endpoint, params, account, { costPerAttempt = 1 } = {}) {
+    let rawResult;
+    try {
+      rawResult = await apiCallFn(endpoint, params);
+    } catch {
+      rawResult = { attempted: true, attempts: 1, response: null, error: "transport_error" };
+    }
+    const result = normalizeDatalasticResult(rawResult);
+    if (result.attempted) {
+      await logApiUsage(prisma, endpoint, result.attempts * costPerAttempt, account);
+    }
+    return result;
+  }
 
   // Search vessels via Datalastic API (by name or IMO)
   router.get("/search", async (req, res) => {
@@ -83,8 +113,9 @@ export default function vesselRoutes(prisma) {
 
       if (isIMO) {
         endpoint = "vessel_info";
-        result = await apiCall(endpoint, { imo: q });
-        await logApiUsage(prisma, endpoint, 1, req.account);
+        const transport = await requestDatalastic(endpoint, { imo: q }, req.account);
+        if (!transport.response) return res.status(502).json({ error: "Datalastic API unavailable" });
+        result = transport.response;
         if (result && result.data) {
           const d = result.data;
           return res.json([{
@@ -98,8 +129,9 @@ export default function vesselRoutes(prisma) {
 
       if (isMMSI) {
         endpoint = "vessel_info";
-        result = await apiCall(endpoint, { mmsi: q });
-        await logApiUsage(prisma, endpoint, 1, req.account);
+        const transport = await requestDatalastic(endpoint, { mmsi: q }, req.account);
+        if (!transport.response) return res.status(502).json({ error: "Datalastic API unavailable" });
+        result = transport.response;
         if (result && result.data) {
           const d = result.data;
           return res.json([{
@@ -112,8 +144,9 @@ export default function vesselRoutes(prisma) {
       }
 
       endpoint = "vessel_find";
-      result = await apiCall(endpoint, { name: q });
-      await logApiUsage(prisma, endpoint, 1, req.account);
+      const transport = await requestDatalastic(endpoint, { name: q }, req.account);
+      if (!transport.response) return res.status(502).json({ error: "Datalastic API unavailable" });
+      result = transport.response;
       if (!result || !result.data) return res.json([]);
 
       const vessels = (Array.isArray(result.data) ? result.data : [result.data])
@@ -342,15 +375,27 @@ export default function vesselRoutes(prisma) {
       }
 
       const params = vessel.imo ? { imo: vessel.imo, days } : { mmsi: vessel.mmsi, days };
-      const result = await apiCall("vessel_history", params);
-      await logApiUsage(prisma, "vessel_history", days, req.account);
+      const transport = await requestDatalastic(
+        "vessel_history",
+        params,
+        req.account,
+        { costPerAttempt: days },
+      );
+      const result = transport.response;
+      const creditsUsed = days * transport.attempts;
 
-      if (!result || (!result.data && !Array.isArray(result))) {
+      if (!result) {
+        return res.status(502).json({
+          error: "Datalastic API unavailable",
+          credits_used: creditsUsed,
+        });
+      }
+      if (!result.data && !Array.isArray(result)) {
         const isNotFound = result?.meta?.success === false;
         const errMsg = isNotFound
           ? "vessel_history API를 사용할 수 없습니다 (현재 구독 플랜 미포함). 관리자에게 문의하세요."
           : "Datalastic API 응답 없음";
-        return res.status(502).json({ error: errMsg, credits_used: 0 });
+        return res.status(502).json({ error: errMsg, credits_used: creditsUsed });
       }
 
       const payload = result?.data?.positions;
@@ -361,7 +406,7 @@ export default function vesselRoutes(prisma) {
           : Array.isArray(result?.positions)
             ? result.positions
             : [];
-      if (records.length === 0) return res.json({ fetched: 0, stored: 0, credits_used: days });
+      if (records.length === 0) return res.json({ fetched: 0, stored: 0, credits_used: creditsUsed });
 
       let stored = 0;
       const sorted = records
@@ -387,6 +432,8 @@ export default function vesselRoutes(prisma) {
         const epoch = r.last_position_epoch || r.timestamp_epoch;
         const timestamp = epoch ? new Date(epoch * 1000) : null;
         if (!timestamp || isNaN(timestamp.getTime())) continue;
+        const parsedCog = parseFloat(r.course);
+        const parsedSog = parseFloat(r.speed);
 
         const { suspicious, impliedSpeed, reason } = checkSpoofing(prevPos, lat, lon, timestamp);
 
@@ -395,8 +442,8 @@ export default function vesselRoutes(prisma) {
             where: { vesselId_timestamp: { vesselId: id, timestamp } },
             create: {
               vesselId: id, lat, lon,
-              cog: parseFloat(r.course) || null,
-              sog: parseFloat(r.speed) || null,
+              cog: Number.isNaN(parsedCog) ? null : parsedCog,
+              sog: Number.isNaN(parsedSog) ? null : parsedSog,
               heading: r.heading != null && r.heading !== 511 ? parseInt(r.heading) : null,
               navStatus: r.navigation_status || null,
               destination: r.destination || null,
@@ -411,8 +458,8 @@ export default function vesselRoutes(prisma) {
         } catch { /* skip duplicates */ }
       }
 
-      logger.info(`[History] ${vessel.name || vessel.mmsi}: ${records.length} fetched, ${stored} stored, ${days} credits (${req.account})`);
-      res.json({ fetched: records.length, stored, credits_used: days });
+      logger.info(`[History] ${vessel.name || vessel.mmsi}: ${records.length} fetched, ${stored} stored, ${creditsUsed} credits (${req.account})`);
+      res.json({ fetched: records.length, stored, credits_used: creditsUsed });
     } catch (e) {
       console.error("[History] Error:", e.message);
       res.status(500).json({ error: "Internal server error" });

@@ -6,7 +6,10 @@ export function isUnauthorizedCloseEvent(event = {}) {
   return reason.includes("unauthor") || reason.includes("auth") || reason.includes("invalid token") || reason.includes("expired");
 }
 
-export function shouldReconnectWebSocket(event = {}, { intentionalClose = false } = {}) {
-  if (intentionalClose) return false;
+export function shouldReconnectWebSocket(
+  event = {},
+  { intentionalClose = false, isCurrentSocket = true } = {}
+) {
+  if (!isCurrentSocket || intentionalClose) return false;
   return !isUnauthorizedCloseEvent(event);
 }

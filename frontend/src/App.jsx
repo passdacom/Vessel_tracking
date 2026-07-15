@@ -160,7 +160,6 @@ function App() {
 
   const [wsConnected, setWsConnected] = useState(false);
   const [isAuthed, setIsAuthed] = useState(() => {
-    // ① 세션 토큰 확인 (새 방식)
     const token = localStorage.getItem("vessel_token");
     const tokenExp = localStorage.getItem("vessel_token_expires");
     if (token && tokenExp && Date.now() < parseInt(tokenExp, 10)) return true;
@@ -168,12 +167,6 @@ function App() {
       localStorage.removeItem("vessel_token");
       localStorage.removeItem("vessel_token_expires");
     }
-    // ② 비밀번호 폴백 (구 방식 — 기존 로그인 유지용)
-    const auth = localStorage.getItem("vessel_auth");
-    const authExp = localStorage.getItem("vessel_auth_expires");
-    if (auth && authExp && Date.now() < parseInt(authExp, 10)) return true;
-    localStorage.removeItem("vessel_auth");
-    localStorage.removeItem("vessel_auth_expires");
     localStorage.removeItem("vessel_account");
     localStorage.removeItem("vessel_role");
     return false;
@@ -193,19 +186,9 @@ function App() {
   const [etaDestination, setEtaDestination] = useState(null); // { lat, lon }
   const [etaResult, setEtaResult] = useState(null);
 
-  const handleLogin = (pw, account, role, token) => {
-    if (token) {
-      // 새 방식: 서버 발급 세션 토큰 저장
-      localStorage.setItem("vessel_token", token);
-      localStorage.setItem("vessel_token_expires", (Date.now() + 86400000).toString());
-      // 구 비밀번호 스토리지 제거
-      localStorage.removeItem("vessel_auth");
-      localStorage.removeItem("vessel_auth_expires");
-    } else {
-      // 폴백: 구 방식 유지 (서버가 토큰을 내려주지 않는 경우)
-      localStorage.setItem("vessel_auth", pw);
-      localStorage.setItem("vessel_auth_expires", (Date.now() + 86400000).toString());
-    }
+  const handleLogin = (account, role, token) => {
+    localStorage.setItem("vessel_token", token);
+    localStorage.setItem("vessel_token_expires", (Date.now() + 86400000).toString());
     localStorage.setItem("vessel_account", account);
     localStorage.setItem("vessel_role", role);
     setAccountName(account);
@@ -375,9 +358,8 @@ function App() {
 
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsHost = window.location.protocol === "https:" ? window.location.host : `${window.location.hostname}:3001`;
-  // 세션 토큰 우선, 없으면 구 비밀번호 폴백 (WS URL에 평문 비밀번호 노출 방지)
   const wsToken = getStoredAuthToken();
-  const wsUrl = isAuthed ? `${proto}//${wsHost}/ws?token=${encodeURIComponent(wsToken)}` : null;
+  const wsUrl = isAuthed ? `${proto}//${wsHost}/ws` : null;
 
   const dismissToast = useCallback((id) => {
     setZoneToasts((prev) => prev.filter((t) => t.id !== id));
@@ -409,11 +391,15 @@ function App() {
       setPositions((prev) => { const next = { ...prev }; delete next[msg.data.id]; return next; });
       if (selectedVesselId === msg.data.id) setSelectedVesselId(null);
     }
-  }, { onUnauthorized: handleLogout });
+  }, { authToken: wsToken, onUnauthorized: handleLogout });
 
   useEffect(() => {
+    if (!isAuthed) {
+      setWsConnected(false);
+      return;
+    }
     const check = () => {
-      apiFetch("/health")
+      apiFetch("/session")
         .then((r) => {
           setWsConnected(r.ok);
           if (r.status === 401) {
@@ -425,7 +411,7 @@ function App() {
     check();
     const id = setInterval(check, 10000);
     return () => clearInterval(id);
-  }, [apiFetch]);
+  }, [isAuthed, apiFetch]);
 
   // ── 항로 데이터 로딩 ───────────────────────────────────────────────────────
   const fetchLanes = useCallback(async () => {

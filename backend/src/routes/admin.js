@@ -1,6 +1,8 @@
 import { Router } from "express";
+import cron from "node-cron";
 import { getAccountNames, clearAccountCache } from "../accounts.js";
 import { invalidateAccount } from "../sessions.js";
+import { hashPassword, validateNewPassword } from "../passwords.js";
 import { logger } from "../utils/logger.js";
 import { getLastCreditRemaining } from "../services/datalasticPoller.js";
 
@@ -188,18 +190,15 @@ export default function adminRoutes(prisma) {
       if (!name || !/^[a-zA-Z0-9_]{2,30}$/.test(name)) {
         return res.status(400).json({ error: "계정명은 2~30자 영문/숫자/밑줄만 허용됩니다" });
       }
-      if (!password || password.length < 4) {
-        return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다" });
-      }
-      if (password.length > 50) {
-        return res.status(400).json({ error: "비밀번호는 50자 이하여야 합니다" });
-      }
+      const passwordError = validateNewPassword(password);
+      if (passwordError) return res.status(400).json({ error: passwordError });
       const limit = vesselLimit != null ? parseInt(vesselLimit, 10) : 100;
       if (isNaN(limit) || limit < 1 || limit > 1000) {
         return res.status(400).json({ error: "선박 한도는 1~1000 사이여야 합니다" });
       }
+      const passwordHash = await hashPassword(password);
       const account = await prisma.account.create({
-        data: { name, password, role: "user", vesselLimit: limit },
+        data: { name, password: passwordHash, role: "user", vesselLimit: limit },
         select: { id: true, name: true, role: true, vesselLimit: true, createdAt: true },
       });
       clearAccountCache();
@@ -228,6 +227,8 @@ export default function adminRoutes(prisma) {
       }
       await prisma.account.delete({ where: { name } });
       clearAccountCache();
+      invalidateAccount(name);
+      req.app.locals.wsServer?.disconnectAccount(name);
       logger.info(`[Admin] 계정 삭제: ${name}`);
       res.json({ success: true });
     } catch (e) {
@@ -242,12 +243,13 @@ export default function adminRoutes(prisma) {
     try {
       const { name } = req.params;
       const { newPassword } = req.body;
-      if (!newPassword || newPassword.length < 4) {
-        return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다" });
-      }
-      await prisma.account.update({ where: { name }, data: { password: newPassword } });
+      const passwordError = validateNewPassword(newPassword);
+      if (passwordError) return res.status(400).json({ error: passwordError });
+      const password = await hashPassword(newPassword);
+      await prisma.account.update({ where: { name }, data: { password } });
       clearAccountCache();
       invalidateAccount(name); // 기존 세션 즉시 무효화
+      req.app.locals.wsServer?.disconnectAccount(name);
       logger.info(`[Admin] 비밀번호 변경: ${name}`);
       res.json({ success: true });
     } catch (e) {
@@ -336,16 +338,15 @@ export default function adminRoutes(prisma) {
       const updates = [];
 
       if (poll_cron !== undefined) {
-        // cron 유효성: 기본 검증 (5~6 필드)
-        const parts = String(poll_cron).trim().split(/\s+/);
-        if (parts.length < 5 || parts.length > 6) {
+        const normalizedCron = String(poll_cron).trim();
+        if (!cron.validate(normalizedCron)) {
           return res.status(400).json({ error: "유효한 cron 표현식이 아닙니다 (예: 0 4,6,8,11,15,23 * * *)" });
         }
         updates.push(
           prisma.systemConfig.upsert({
             where: { key: "poll_cron" },
-            update: { value: String(poll_cron).trim() },
-            create: { key: "poll_cron", value: String(poll_cron).trim() },
+            update: { value: normalizedCron },
+            create: { key: "poll_cron", value: normalizedCron },
           })
         );
       }

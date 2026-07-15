@@ -9,21 +9,26 @@ import sharesRoutes from "./routes/shares.js";
 import portRoutes from "./routes/ports.js";
 import adminRoutes from "./routes/admin.js";
 import laneRoutes from "./routes/lanes.js";
+import { createForceUpdateHandler } from "./routes/forceUpdate.js";
 import { createWsServer } from "./services/wsServer.js";
 import { createDatalasticPoller } from "./services/datalasticPoller.js";
 import { startCleanupJob } from "./services/cleanup.js";
-import { authenticate, clearAccountCache } from "./accounts.js";
+import { authenticate, authenticateCredentials, clearAccountCache } from "./accounts.js";
 import { createSession, invalidateAccount } from "./sessions.js";
+import { hashPassword, validateNewPassword } from "./passwords.js";
 import { geofenceChecker } from "./services/geofenceChecker.js";
 import { logger } from "./utils/logger.js";
+import { createGracefulShutdown } from "./shutdown.js";
+import { resolveBackendHost, trustImmediateLoopbackProxy } from "./network.js";
+import { installRuntimeHandlers } from "./runtime.js";
 
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3001;
+const HOST = resolveBackendHost();
 
-// Nginx reverse proxy passes X-Forwarded-For; express-rate-limit needs this
-// to identify real client IPs without emitting validation errors.
-app.set("trust proxy", 1);
+// Forwarded client IPs are accepted only from a reverse proxy connected over loopback.
+app.set("trust proxy", trustImmediateLoopbackProxy);
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
 // ALLOWED_ORIGINS 환경변수로 허용 오리진 지정, 없으면 전체 허용(하위 호환)
@@ -64,13 +69,21 @@ const historyLimiter = rateLimit({
 });
 app.use("/api/vessels/:id/history", historyLimiter);
 
+const searchLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many vessel searches, please try again later" },
+});
+app.use("/api/vessels/search", searchLimiter);
+
 // ── 인증 엔드포인트 ────────────────────────────────────────────────────────────
 app.post("/api/auth", authLimiter, async (req, res) => {
   try {
-    const { password } = req.body;
-    if (!password) return res.status(400).json({ error: "비밀번호를 입력해주세요" });
-    const account = await authenticate(prisma, password);
-    if (!account) return res.status(401).json({ error: "Invalid password" });
+    const { account: accountName, password } = req.body;
+    if (!accountName || !password) {
+      return res.status(400).json({ error: "계정명과 비밀번호를 입력해주세요" });
+    }
+    const account = await authenticateCredentials(prisma, accountName, password);
+    if (!account) return res.status(401).json({ error: "Invalid account or password" });
     const token = createSession(account.name, account.role);
     logger.info(`[Auth] 로그인 성공: ${account.name} (${req.ip})`);
     res.json({ account: account.name, role: account.role, token });
@@ -87,12 +100,8 @@ app.post("/api/account/change-password", async (req, res) => {
   if (!account) return res.status(401).json({ error: "Unauthorized" });
 
   const { targetAccount, newPassword } = req.body;
-  if (!newPassword || newPassword.length < 4) {
-    return res.status(400).json({ error: "비밀번호는 4자 이상이어야 합니다" });
-  }
-  if (newPassword.length > 50) {
-    return res.status(400).json({ error: "비밀번호는 50자 이하여야 합니다" });
-  }
+  const passwordError = validateNewPassword(newPassword);
+  if (passwordError) return res.status(400).json({ error: passwordError });
 
   const target = targetAccount || account.name;
   if (account.role !== "admin" && target !== account.name) {
@@ -100,9 +109,11 @@ app.post("/api/account/change-password", async (req, res) => {
   }
 
   try {
-    await prisma.account.update({ where: { name: target }, data: { password: newPassword } });
+    const password = await hashPassword(newPassword);
+    await prisma.account.update({ where: { name: target }, data: { password } });
     clearAccountCache();
     invalidateAccount(target); // 기존 세션 즉시 무효화
+    req.app.locals.wsServer?.disconnectAccount(target);
     logger.info(`[Auth] 비밀번호 변경: ${target} by ${account.name}`);
     res.json({ success: true, message: `${target} 계정의 비밀번호가 변경되었습니다` });
   } catch (e) {
@@ -136,51 +147,26 @@ app.use("/api/shares", sharesRoutes(prisma));
 app.use("/api/ports", portRoutes(prisma));
 app.use("/api/admin", adminRoutes(prisma));
 app.use("/api/lanes", laneRoutes(prisma));
+app.get("/api/session", (req, res) => res.json({ account: req.account, role: req.accountRole }));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 // ── 수동 강제 업데이트 (admin 세션 또는 admin 비밀번호) ────────────────────────
-app.post("/api/force-update", async (req, res) => {
-  if (req.accountRole !== "admin") {
-    // 비밀번호 직접 검증 (비 admin 계정에서도 admin 비밀번호 알면 허용)
-    const { password } = req.body;
-    if (!password) return res.status(401).json({ error: "비밀번호를 입력해주세요." });
-    const adminAccount = await prisma.account.findUnique({ where: { name: "admin" } });
-    if (!adminAccount || adminAccount.password !== password) {
-      return res.status(401).json({ error: "비밀번호가 올바르지 않습니다." });
-    }
-  }
-  const { mmsiList } = req.body;
-
-  res.setHeader("Content-Type", "text/plain; charset=utf-8");
-  res.setHeader("Transfer-Encoding", "chunked");
-  const logFn = (msg) => { res.write(msg + "\n"); };
-
-  try {
-    if (mmsiList && Array.isArray(mmsiList) && mmsiList.length > 0) {
-      logFn(`▶ 선택 선박 ${mmsiList.length}척 갱신: ${mmsiList.join(", ")}`);
-      await datalasticPoller.forceUpdate(logFn, mmsiList);
-    } else {
-      logFn("▶ 전체 선박 강제 갱신 시작...");
-      await datalasticPoller.forceUpdate(logFn);
-    }
-    res.end();
-  } catch (error) {
-    logger.error("[force-update] 오류:", error.message);
-    logFn(`❌ 오류 발생: ${error.message}`);
-    res.end();
-  }
-});
+app.post("/api/force-update", createForceUpdateHandler({ prisma }));
 
 const httpServer = createServer(app);
 const wsServer = createWsServer(httpServer, prisma);
+const handleZoneEvent = (zoneEventData) => {
+  wsServer.broadcastToAccount(
+    { type: "zone_event", data: zoneEventData },
+    zoneEventData.account || ""
+  );
+};
 
 const datalasticPoller = createDatalasticPoller(prisma, (positionData) => {
-  wsServer.broadcast({ type: "position", data: positionData });
+  wsServer.broadcastToAccount({ type: "position", data: positionData }, positionData.account);
 }, (vesselData) => {
   wsServer.broadcastToAccount({ type: "vessel_updated", data: vesselData }, vesselData.account);
-}, (zoneEventData) => {
-  wsServer.broadcastToAccount({ type: "zone_event", data: zoneEventData }, zoneEventData.account || "");
-});
+}, handleZoneEvent);
 
 async function init() {
   app.locals.wsServer = wsServer;
@@ -188,7 +174,7 @@ async function init() {
   startCleanupJob(prisma);
 
   geofenceChecker.loadZones();
-  await geofenceChecker.initState(prisma);
+  await geofenceChecker.initState(prisma, handleZoneEvent);
 
   datalasticPoller.start();
 
@@ -197,19 +183,29 @@ async function init() {
     for (const entry of process.env.ACCOUNTS.split(",")) {
       const [name, password] = entry.trim().split(":");
       if (!name || !password) continue;
-      await prisma.account.create({ data: { name, password, role: name === "admin" ? "admin" : "user" } });
+      const passwordHash = await hashPassword(password);
+      await prisma.account.create({ data: { name, password: passwordHash, role: name === "admin" ? "admin" : "user" } });
     }
     logger.info("[ACCOUNTS] Seeded from env var");
   }
 
   const vessels = await prisma.vessel.findMany();
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    logger.info(`✅ Server running at http://0.0.0.0:${PORT}`);
+  httpServer.listen(PORT, HOST, () => {
+    logger.info(`✅ Server running at http://${HOST}:${PORT}`);
     logger.info(`📡 Tracking ${vessels.length} vessel(s) via Datalastic`);
   });
 }
 
-init().catch((e) => { logger.error("Failed to start:", e); process.exit(1); });
-process.on("SIGINT", async () => { datalasticPoller.stop(); await prisma.$disconnect(); process.exit(0); });
-process.on("uncaughtException", (err) => { logger.error("[uncaughtException]", err); });
-process.on("unhandledRejection", (reason) => { logger.error("[unhandledRejection]", reason); });
+const shutdown = createGracefulShutdown({
+  httpServer,
+  wsServer,
+  poller: datalasticPoller,
+  prisma,
+  timeoutMs: Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10_000,
+  log: logger,
+});
+installRuntimeHandlers({ shutdown, log: logger });
+init().catch((error) => {
+  logger.error("Failed to start:", error);
+  void shutdown("startupError", { exitCode: 1 });
+});

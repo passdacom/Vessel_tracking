@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 
 export default function LoginPage({ onLogin }) {
+  const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -14,14 +15,13 @@ export default function LoginPage({ onLogin }) {
       const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ account, password }),
       });
       if (res.ok) {
         const data = await res.json();
-        // data.token: 서버 발급 세션 토큰 (없으면 구 방식 폴백)
-        onLogin(password, data.account, data.role, data.token);
+        onLogin(data.account, data.role, data.token);
       } else {
-        setError('잘못된 비밀번호입니다.');
+        setError('계정명 또는 비밀번호가 올바르지 않습니다.');
       }
     } catch {
       setError('서버에 연결할 수 없습니다.');
@@ -41,19 +41,35 @@ export default function LoginPage({ onLogin }) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-gray-400 text-xs block mb-1">비밀번호</label>
+            <label htmlFor="account" className="text-gray-400 text-xs block mb-1">계정명</label>
             <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="비밀번호 입력"
+              id="account"
+              name="account"
+              type="text"
+              value={account}
+              onChange={(e) => setAccount(e.target.value)}
+              placeholder="계정명 입력"
+              autoComplete="username"
               className="w-full px-4 py-2.5 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500"
               autoFocus
             />
           </div>
+          <div>
+            <label htmlFor="password" className="text-gray-400 text-xs block mb-1">비밀번호</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="비밀번호 입력"
+              autoComplete="current-password"
+              className="w-full px-4 py-2.5 rounded-lg bg-gray-700 text-white border border-gray-600 focus:border-blue-500 focus:outline-none placeholder-gray-500"
+            />
+          </div>
 
           {error && (
-            <p className="text-red-400 text-sm bg-red-950 border border-red-800 rounded px-3 py-2">
+            <p role="alert" aria-live="polite" className="text-red-400 text-sm bg-red-950 border border-red-800 rounded px-3 py-2">
               {error}
             </p>
           )}

@@ -1,6 +1,20 @@
 import express from "express";
 import crypto from "crypto";
 
+const DEFAULT_EXPIRY_HOURS = 7 * 24;
+const MAX_EXPIRY_HOURS = 30 * 24;
+const MAX_PUBLIC_HISTORY_HOURS = 7 * 24;
+
+function parseShareVesselIds(rawIds) {
+  try {
+    const parsedIds = JSON.parse(rawIds);
+    if (!Array.isArray(parsedIds)) return null;
+    return [...new Set(parsedIds.map(Number).filter((id) => Number.isSafeInteger(id) && id > 0))];
+  } catch {
+    return null;
+  }
+}
+
 function requireAdmin(req, res, next) {
   // Auth is already handled by the global middleware (req.account is set)
   // This just ensures the request has been authenticated
@@ -20,18 +34,55 @@ export default function sharesRoutes(prisma) {
   router.get("/", requireAdmin, async (req, res) => {
     const where = req.accountRole === "admin" ? {} : { createdBy: req.account };
     const shares = await prisma.sharedView.findMany({ where, orderBy: { createdAt: "desc" } });
-    res.json(shares.map(s => ({ ...s, vesselIds: JSON.parse(s.vesselIds) })));
+    res.json(shares.map((share) => {
+      const vesselIds = parseShareVesselIds(share.vesselIds);
+      return {
+        ...share,
+        vesselIds: vesselIds || [],
+        ...(vesselIds ? {} : { invalidData: true }),
+      };
+    }));
   });
 
   // 공유 링크 생성 (인증 사용자)
   router.post("/", requireAdmin, async (req, res) => {
-    const { label, vesselIds } = req.body;
-    if (!label || !vesselIds?.length) {
+    const { label, vesselIds, expiresInHours = DEFAULT_EXPIRY_HOURS } = req.body;
+    if (!label || !Array.isArray(vesselIds) || vesselIds.length === 0) {
       return res.status(400).json({ error: "label and vesselIds are required" });
     }
+    const normalizedIds = vesselIds.map((id) => Number(id));
+    if (normalizedIds.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
+      return res.status(400).json({ error: "vesselIds must contain positive integer IDs" });
+    }
+    if (new Set(normalizedIds).size !== normalizedIds.length) {
+      return res.status(400).json({ error: "duplicate vesselIds are not allowed" });
+    }
+    const expiryHours = Number(expiresInHours);
+    if (!Number.isFinite(expiryHours) || expiryHours < 1 || expiryHours > MAX_EXPIRY_HOURS) {
+      return res.status(400).json({ error: `expiresInHours must be between 1 and ${MAX_EXPIRY_HOURS}` });
+    }
+
+    const where = { id: { in: normalizedIds } };
+    if (req.accountRole !== "admin") where.account = req.account;
+    const allowedVessels = await prisma.vessel.findMany({ where, select: { id: true } });
+    if (allowedVessels.length !== normalizedIds.length) {
+      return res.status(req.accountRole === "admin" ? 400 : 403).json({
+        error: req.accountRole === "admin"
+          ? "One or more vessels do not exist"
+          : "One or more vessels are not owned by this account",
+      });
+    }
+
     const token = crypto.randomBytes(12).toString("base64url");
+    const expiresAt = new Date(Date.now() + expiryHours * 60 * 60 * 1000);
     const share = await prisma.sharedView.create({
-      data: { token, label, vesselIds: JSON.stringify(vesselIds), createdBy: req.account },
+      data: {
+        token,
+        label,
+        vesselIds: JSON.stringify(normalizedIds),
+        createdBy: req.account,
+        expiresAt,
+      },
     });
     res.json({ ...share, vesselIds: JSON.parse(share.vesselIds) });
   });
@@ -60,15 +111,23 @@ export default function sharesRoutes(prisma) {
       return res.status(410).json({ error: "This link has expired" });
     }
 
-    const vesselIds = JSON.parse(share.vesselIds);
-    const hours = parseInt(req.query.hours || "24");
+    const vesselIds = parseShareVesselIds(share.vesselIds);
+    if (!vesselIds) {
+      return res.status(404).json({ error: "Invalid or expired link" });
+    }
+    const requestedHours = Number.parseInt(req.query.hours || "24", 10);
+    const hours = Number.isFinite(requestedHours)
+      ? Math.max(1, Math.min(requestedHours, MAX_PUBLIC_HISTORY_HOURS))
+      : 24;
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
+    const where = { id: { in: vesselIds } };
+    if (share.createdBy && share.createdBy !== "admin") where.account = share.createdBy;
     const vessels = await prisma.vessel.findMany({
-      where: { id: { in: vesselIds } },
+      where,
       include: {
         positions: {
-          where: { timestamp: { gte: since } },
+          where: { timestamp: { gte: since }, suspicious: false },
           orderBy: { timestamp: "desc" },
           take: 500,
         },

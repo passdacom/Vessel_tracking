@@ -4,15 +4,20 @@ import express from "express";
 import vesselRoutes from "../src/routes/vessels.js";
 
 function makePrisma() {
+  const admin = { name: "admin", password: "admin-secret", role: "admin" };
   return {
     account: {
       async findUnique({ where, select } = {}) {
         if (where?.name !== "admin") return null;
-        const row = { name: "admin", password: "admin-secret" };
         if (select) {
-          return Object.fromEntries(Object.keys(select).filter((key) => select[key]).map((key) => [key, row[key]]));
+          return Object.fromEntries(Object.keys(select).filter((key) => select[key]).map((key) => [key, admin[key]]));
         }
-        return row;
+        return admin;
+      },
+      async update({ where, data }) {
+        if (where?.name !== "admin") return null;
+        Object.assign(admin, data);
+        return admin;
       },
     },
     apiUsage: {

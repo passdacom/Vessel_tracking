@@ -8,6 +8,8 @@ export default defineConfig({
     port: 5173,
     allowedHosts: [
       'vessel.ttacom.net',
+      'openclaw',
+      'openclaw.tail8b3bcc.ts.net',
       'localhost',
     ],
     proxy: {

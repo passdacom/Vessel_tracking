@@ -17,3 +17,7 @@ test("shouldReconnectWebSocket suppresses reconnect for unauthorized closes", ()
 test("shouldReconnectWebSocket suppresses reconnect during intentional hook cleanup", () => {
   assert.equal(shouldReconnectWebSocket({ code: 1000, reason: "normal" }, { intentionalClose: true }), false);
 });
+
+test("shouldReconnectWebSocket suppresses reconnect for stale sockets", () => {
+  assert.equal(shouldReconnectWebSocket({ code: 1006, reason: "network lost" }, { isCurrentSocket: false }), false);
+});

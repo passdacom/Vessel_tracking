@@ -237,7 +237,7 @@ const handleToggleActive = async (lane) => {
 
 ### 1. apiFetch prop 일관성 유지
 
-LaneEditor, LaneList, LaneManager 모두 `apiFetch`를 prop으로 주입받는다. App.jsx의 인증 헤더 처리 로직이 한 곳에만 있고, 모든 하위 컴포넌트가 이를 재사용한다. 인증 방식(토큰 → 패스워드 폴백)이 바뀌어도 App.jsx의 `apiFetch` 함수만 수정하면 된다.
+LaneEditor, LaneList, LaneManager 모두 `apiFetch`를 prop으로 주입받는다. App.jsx의 세션 토큰 인증 헤더 처리 로직이 한 곳에만 있고, 모든 하위 컴포넌트가 이를 재사용한다. 인증 방식이 바뀌어도 App.jsx의 `apiFetch` 함수만 수정하면 된다.
 
 ### 2. lanes.js의 권한 분리 설계
 

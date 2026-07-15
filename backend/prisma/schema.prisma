@@ -38,6 +38,8 @@ model Vessel {
 
   @@unique([account, mmsi])
   @@index([account])
+  @@index([active])
+  @@index([infoFetched])
 }
 
 model Position {
@@ -59,6 +61,7 @@ model Position {
 
   @@unique([vesselId, timestamp])
   @@index([vesselId, timestamp(sort: Desc)])
+  @@index([vesselId, suspicious, timestamp(sort: Desc)])
 }
 
 model Incident {
@@ -143,6 +146,7 @@ model ZoneEvent {
   createdAt    DateTime @default(now())
 
   @@index([vesselId, posTimestamp(sort: Desc)])
+  @@index([vesselId, zoneName, createdAt(sort: Desc)])
   @@index([createdAt(sort: Desc)])
   @@index([eventType])
 }
@@ -157,6 +161,7 @@ model SharedView {
   expiresAt DateTime?
 
   @@index([createdBy])
+  @@index([expiresAt])
 }
 
 model ShippingLane {

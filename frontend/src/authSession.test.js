@@ -72,7 +72,11 @@ test("createApiFetch clears stale token and calls onUnauthorized when API return
   assert.equal(logoutCount, 1);
 });
 
-test("getStoredAuthToken prefers session token over legacy password", () => {
-  const storage = makeStorage({ vessel_token: "token", vessel_auth: "legacy" });
+test("auth storage never treats a legacy password as a bearer token", () => {
+  const storage = makeStorage({ vessel_auth: "legacy" });
+  assert.equal(AUTH_STORAGE_KEYS.includes("vessel_auth"), false);
+  assert.equal(AUTH_STORAGE_KEYS.includes("vessel_auth_expires"), false);
+  assert.equal(getStoredAuthToken(storage), "");
+  storage.setItem("vessel_token", "token");
   assert.equal(getStoredAuthToken(storage), "token");
 });
