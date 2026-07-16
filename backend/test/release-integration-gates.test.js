@@ -98,7 +98,11 @@ esac
 `);
   executable(resolve(bin, "sha256sum"), "#!/usr/bin/env bash\nprintf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  %s\\n' \"$1\"\n");
   executable(resolve(bin, "pm2"), `#!/usr/bin/env bash
-if [[ "$1" == 'jlist' ]]; then printf '[]\\n'; exit 0; fi
+if [[ "$1" == 'jlist' ]]; then
+  if [[ "$*" != *'--silent'* ]]; then printf '\\033[32m[PM2] Spawning daemon\\033[0m\\n'; fi
+  printf '[]\\n'
+  exit 0
+fi
 printf 'pm2 %s\\n' "$*" >> '${eventLog}'
 `);
 

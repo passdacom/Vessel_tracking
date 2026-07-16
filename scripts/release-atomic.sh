@@ -100,7 +100,9 @@ assert_pm2_scope() {
       "Refusing non-dedicated PM2_HOME '$PM2_HOME' (required: '$DEDICATED_PM2_HOME')"
   fi
 
-  inventory="$(pm2_vessel jlist)"
+  # A first invocation can spawn the PM2 daemon. Without --silent PM2 writes
+  # coloured startup banners to stdout before the JSON inventory.
+  inventory="$(pm2_vessel jlist --silent)"
   unexpected="$(printf '%s' "$inventory" | node -e '
 let input = "";
 process.stdin.on("data", (chunk) => { input += chunk; });
