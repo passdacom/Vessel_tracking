@@ -41,7 +41,9 @@ function runPrebuiltDeployScenario({
   const currentRelease = resolve(releases, "current-release");
   const targetRelease = resolve(releases, candidateSha);
   const eventLog = resolve(sandbox, "events.log");
+  const backendEnvFile = resolve(sandbox, "vessel-tracking.env");
   writeFileSync(eventLog, "");
+  writeFileSync(backendEnvFile, "VESSEL_DB_WAIT_MAX_MS=12345\n", { mode: 0o600 });
   mkdirSync(resolve(repo, ".git"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   for (const release of [currentRelease, targetRelease]) {
@@ -111,6 +113,7 @@ printf 'pm2 %s\\n' "$*" >> '${eventLog}'
       PM2_BIN: "pm2",
       APPROVE_RELEASE: "YES",
       DATABASE_URL: "postgresql://placeholder.invalid/db",
+      VESSEL_BACKEND_ENV_FILE: backendEnvFile,
       EXTERNAL_URL: "https://attacker.invalid",
       UNRELATED_SENTINEL: "must-not-reach-smoke",
     },

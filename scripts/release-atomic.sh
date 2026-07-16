@@ -306,7 +306,7 @@ if [[ "$ACTION" == "rollback" && "${APPROVE_ROLLBACK:-}" != "YES" ]]; then
 fi
 if [[ -z "${DATABASE_URL:-}" ]]; then
   DATABASE_URL="$(
-    cd "$ROOT/backend"
+    cd "$SCRIPT_DIR/../backend"
     VESSEL_BACKEND_ENV_FILE="$BACKEND_ENV_FILE" node --input-type=module -e '
 import { loadBackendEnv } from "./wait-for-db.js";
 const databaseUrl = loadBackendEnv().DATABASE_URL;
@@ -318,7 +318,7 @@ process.stdout.write(databaseUrl);
 fi
 if [[ -z "${VESSEL_DB_WAIT_MAX_MS:-}" && -f "$BACKEND_ENV_FILE" ]]; then
   VESSEL_DB_WAIT_MAX_MS="$(
-    cd "$ROOT/backend"
+    cd "$SCRIPT_DIR/../backend"
     VESSEL_BACKEND_ENV_FILE="$BACKEND_ENV_FILE" node --input-type=module -e '
 import { loadBackendEnv } from "./wait-for-db.js";
 process.stdout.write(loadBackendEnv().VESSEL_DB_WAIT_MAX_MS || "120000");
