@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createForceUpdateHandler } from "../src/routes/forceUpdate.js";
+
+test("admin polling disable uses reversible pause rather than terminal stop", () => {
+  const adminSource = readFileSync(fileURLToPath(new URL("../src/routes/admin.js", import.meta.url)), "utf8");
+  assert.match(adminSource, /poller\.pause\(\)/);
+  assert.doesNotMatch(adminSource, /poller\.stop\(\)/);
+});
 
 function makeResponse() {
   return {
@@ -58,6 +66,28 @@ test("manual force-update endpoint turns an acquisition race into 409 before str
 
   assert.equal(res.statusCode, 409);
   assert.equal(res.body.run.source, "startup");
+  assert.deepEqual(res.chunks, []);
+  assert.equal(res.headers["transfer-encoding"], undefined);
+});
+
+test("manual force-update endpoint returns 503 without starting a stopped poller", async () => {
+  let forceCalls = 0;
+  const poller = {
+    getRunState: () => ({ running: false, stopped: true, source: null, startedAt: null }),
+    forceUpdate() { forceCalls += 1; },
+  };
+  const handler = createForceUpdateHandler({
+    prisma: {},
+    getPoller: () => poller,
+    authenticateCredentialsFn: async () => null,
+  });
+  const res = makeResponse();
+
+  await handler({ accountRole: "admin", body: {}, app: { locals: { poller } } }, res);
+
+  assert.equal(res.statusCode, 503);
+  assert.equal(res.body.error, "Polling service stopped");
+  assert.equal(forceCalls, 0);
   assert.deepEqual(res.chunks, []);
   assert.equal(res.headers["transfer-encoding"], undefined);
 });

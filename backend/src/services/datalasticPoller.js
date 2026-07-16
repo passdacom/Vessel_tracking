@@ -7,6 +7,8 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_RESPONSE_BYTES = 1_048_576;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_DELAY_MS = 250;
+const DEFAULT_CREDIT_STATUS_MAX_AGE_MS = 300_000;
+const MAX_CREDIT_STATUS_MAX_AGE_MS = 86_400_000;
 
 // ── AIS 스푸핑 탐지 설정 ──
 const MAX_SPEED_KNOTS = 25;
@@ -181,6 +183,27 @@ export function getLastCreditRemaining() {
   };
 }
 
+function parseNumericField(value) {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.trim() !== "") return Number(value);
+  return Number.NaN;
+}
+
+function parsePositionRecord(data) {
+  const lat = parseNumericField(data?.lat);
+  const lon = parseNumericField(data?.lon);
+  const epoch = parseNumericField(data?.last_position_epoch);
+  if (
+    !Number.isFinite(lat) || lat < -90 || lat > 90 ||
+    !Number.isFinite(lon) || lon < -180 || lon > 180 ||
+    !Number.isFinite(epoch) || epoch <= 0
+  ) {
+    return null;
+  }
+  const timestamp = new Date(epoch * 1000);
+  return Number.isFinite(timestamp.getTime()) ? { lat, lon, timestamp } : null;
+}
+
 /**
  * 공통: 단일 선박에 대해 API 응답 데이터를 파싱하고 DB에 저장 + 브로드캐스트
  * 여러 계정에서 같은 MMSI를 등록한 경우, vessel 목록을 배열로 받아 모두 저장한다.
@@ -202,9 +225,9 @@ async function processVesselData(
 ) {
   const log = logFn || ((msg) => logger.info(msg));
 
-  const lat = parseFloat(d.lat);
-  const lon = parseFloat(d.lon);
-  if (isNaN(lat) || isNaN(lon)) return;   // P0 버그 수정: !lat && !lon → isNaN 처리
+  const parsedPosition = parsePositionRecord(d);
+  if (!parsedPosition) return;
+  const { lat, lon, timestamp } = parsedPosition;
 
   const parsedCog = parseFloat(d.course);
   const parsedSog = parseFloat(d.speed);
@@ -214,7 +237,6 @@ async function processVesselData(
   const navStatus = d.navigation_status || null;
   const destination = d.destination || null;
   const eta       = d.eta_UTC ? new Date(d.eta_UTC) : null;
-  const timestamp = d.last_position_epoch ? new Date(d.last_position_epoch * 1000) : new Date();
 
   for (const v of vessels) {
     // 이름 업데이트 (미입력 시)
@@ -293,6 +315,23 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
   const creditReserve = Number.isFinite(options.creditReserve)
     ? Math.max(0, options.creditReserve)
     : Math.max(0, configuredReserve || 0);
+  const configuredStatusMaxAge = Number.parseInt(
+    process.env.DATALASTIC_CREDIT_STATUS_MAX_AGE_MS || "",
+    10,
+  );
+  const requestedStatusMaxAge = Number.isFinite(options.creditStatusMaxAgeMs)
+    ? options.creditStatusMaxAgeMs
+    : configuredStatusMaxAge;
+  const creditStatusMaxAgeMs = Math.min(
+    MAX_CREDIT_STATUS_MAX_AGE_MS,
+    Math.max(
+      1,
+      Number.isFinite(requestedStatusMaxAge)
+        ? Math.floor(requestedStatusMaxAge)
+        : DEFAULT_CREDIT_STATUS_MAX_AGE_MS,
+    ),
+  );
+  const nowFn = options.nowFn || Date.now;
   const getCreditStatus = options.getCreditStatus || getLastCreditRemaining;
   const checker = options.geofenceChecker || geofenceChecker;
   let tasks = [];
@@ -303,7 +342,16 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
   let runCreditAvailable = null;
   let runCreditReserved = 0;
   let runObservedRemaining = null;
+  let runCreditProbeClaimed = false;
+  let runCreditProbeComplete = false;
   let reservationWaiters = [];
+  let stopped = false;
+
+  function stoppedError() {
+    const error = new Error("Polling service is stopped");
+    error.code = "POLL_STOPPED";
+    return error;
+  }
 
   function wakeReservationWaiters() {
     const waiters = reservationWaiters;
@@ -311,49 +359,110 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
     waiters.forEach((resolve) => resolve());
   }
 
+  function readFreshCreditStatus() {
+    let status;
+    try {
+      status = getCreditStatus();
+    } catch {
+      return null;
+    }
+    const remaining = status?.remaining;
+    const checkedAt = Date.parse(status?.checkedAt);
+    const now = Number(nowFn());
+    const age = now - checkedAt;
+    if (
+      !Number.isFinite(remaining) ||
+      !Number.isFinite(checkedAt) ||
+      !Number.isFinite(now) ||
+      age < 0 ||
+      age > creditStatusMaxAgeMs
+    ) {
+      return null;
+    }
+    return { remaining: Math.max(0, Math.floor(remaining)) };
+  }
+
   function initializeCreditBudget() {
-    const remaining = getCreditStatus()?.remaining;
-    runObservedRemaining = Number.isFinite(remaining) ? Math.floor(remaining) : null;
-    runCreditAvailable = runObservedRemaining == null
-      ? null
-      : Math.max(0, runObservedRemaining - creditReserve);
+    const status = readFreshCreditStatus();
+    runObservedRemaining = status?.remaining ?? null;
+    runCreditAvailable = status
+      ? Math.max(0, runObservedRemaining - creditReserve)
+      : null;
     runCreditReserved = 0;
+    runCreditProbeClaimed = Boolean(status);
+    runCreditProbeComplete = Boolean(status);
     wakeReservationWaiters();
   }
 
   async function reserveRequest(logFn) {
-    if (runCreditAvailable == null) {
-      return { reserved: 0, maxAttempts: 1 };
-    }
+    while (true) {
+      if (runCreditAvailable == null) {
+        if (!runCreditProbeClaimed) {
+          runCreditProbeClaimed = true;
+          return { reserved: 0, maxAttempts: 1, probe: true };
+        }
+        if (!runCreditProbeComplete) {
+          await new Promise((resolve) => reservationWaiters.push(resolve));
+          continue;
+        }
+        (logFn || ((msg) => logger.warn(msg)))(
+          `[Datalastic] ⛔ 크레딧 상태가 없거나 만료되어 폴링을 중단합니다.`
+        );
+        return null;
+      }
 
-    while (runCreditAvailable <= 0 && runCreditReserved > 0) {
-      await new Promise((resolve) => reservationWaiters.push(resolve));
-    }
-    if (runCreditAvailable <= 0) {
-      (logFn || ((msg) => logger.warn(msg)))(
-        `[Datalastic] ⛔ 크레딧 보호 중단: 잔량 ${runObservedRemaining}, 예약 하한 ${creditReserve}`
-      );
-      return null;
-    }
+      if (runCreditAvailable <= 0 && runCreditReserved > 0) {
+        await new Promise((resolve) => reservationWaiters.push(resolve));
+        continue;
+      }
+      if (runCreditAvailable <= 0) {
+        (logFn || ((msg) => logger.warn(msg)))(
+          `[Datalastic] ⛔ 크레딧 보호 중단: 잔량 ${runObservedRemaining}, 예약 하한 ${creditReserve}`
+        );
+        return null;
+      }
 
-    const reserved = Math.min(maxAttemptsPerRequest, Math.floor(runCreditAvailable));
-    runCreditAvailable -= reserved;
-    runCreditReserved += reserved;
-    return { reserved, maxAttempts: reserved };
+      const reserved = Math.min(maxAttemptsPerRequest, Math.floor(runCreditAvailable));
+      runCreditAvailable -= reserved;
+      runCreditReserved += reserved;
+      return { reserved, maxAttempts: reserved, probe: false };
+    }
   }
 
   function settleRequestReservation(reservation, attempted, attempts) {
-    if (!reservation || reservation.reserved === 0) return;
+    if (!reservation) return;
     const actualAttempts = attempted ? Math.max(1, Number(attempts) || 1) : 0;
-    runCreditAvailable = Math.max(
-      0,
-      runCreditAvailable + reservation.reserved - actualAttempts,
-    );
-    runCreditReserved = Math.max(0, runCreditReserved - reservation.reserved);
+    let accountedAvailable = runCreditAvailable;
+    if (reservation.reserved > 0) {
+      accountedAvailable = Math.max(
+        0,
+        (Number.isFinite(runCreditAvailable) ? runCreditAvailable : 0)
+          + reservation.reserved
+          - actualAttempts,
+      );
+      runCreditReserved = Math.max(0, runCreditReserved - reservation.reserved);
+    }
+
+    const status = readFreshCreditStatus();
+    if (!status) {
+      runObservedRemaining = null;
+      runCreditAvailable = null;
+    } else {
+      runObservedRemaining = status.remaining;
+      const observedAvailable = Math.max(
+        0,
+        status.remaining - creditReserve - runCreditReserved,
+      );
+      runCreditAvailable = reservation.probe || !Number.isFinite(accountedAvailable)
+        ? observedAvailable
+        : Math.min(accountedAvailable, observedAvailable);
+    }
+    if (reservation.probe) runCreditProbeComplete = true;
     wakeReservationWaiters();
   }
 
   function runSingleFlight(work, { source = "scheduled", joinIfRunning = true } = {}) {
+    if (stopped) throw stoppedError();
     if (activeRun) {
       if (!joinIfRunning) {
         const error = new Error("A polling run is already active");
@@ -456,7 +565,10 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
     if (positions.length === 0) return;
 
     // 오래된 순서로 처리해야 스푸핑 체인이 정확함
-    const sorted = [...positions].sort((a, b) => a.last_position_epoch - b.last_position_epoch);
+    const sorted = positions
+      .filter((position) => parsePositionRecord(position) !== null)
+      .sort((a, b) => Number(a.last_position_epoch) - Number(b.last_position_epoch));
+    if (sorted.length === 0) return;
     const latestPersisted = new Map(await Promise.all(vesselGroup.map(async (vessel) => {
       const latest = await prisma.position.findFirst({
         where: { vesselId: vessel.id, suspicious: false },
@@ -488,18 +600,21 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
         imo: histData.imo,
       };
 
-      const pointTimestamp = new Date(pos.last_position_epoch * 1000);
+      const pointTimestamp = new Date(Number(pos.last_position_epoch) * 1000);
       for (const vessel of vesselGroup) {
         const persistedTimestamp = latestPersisted.get(vessel.id);
-        const advancesCurrentState = isLatest && (
+        const reconcilesCurrentState = isLatest && (
+          !persistedTimestamp || pointTimestamp >= persistedTimestamp
+        );
+        const broadcastsFreshPosition = isLatest && (
           !persistedTimestamp || pointTimestamp > persistedTimestamp
         );
         await processVesselData(
           prisma, [vessel], d,
-          advancesCurrentState ? log : () => {},
-          advancesCurrentState ? onPosition : null,
-          advancesCurrentState ? onZoneEvent : null,
-          { evaluateGeofence: advancesCurrentState, checker },
+          broadcastsFreshPosition ? log : () => {},
+          broadcastsFreshPosition ? onPosition : null,
+          reconcilesCurrentState ? onZoneEvent : null,
+          { evaluateGeofence: reconcilesCurrentState, checker },
         );
       }
       savedCount++;
@@ -538,6 +653,7 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
 
   // cron 스케줄 시작 헬퍼
   function startCron(cronExpr) {
+    if (stopped) return false;
     if (!cronExpr || !cronImpl.validate(cronExpr)) {
       logger.error(`[Datalastic] 유효하지 않은 cron 표현식: ${cronExpr}`);
       return false;
@@ -545,6 +661,7 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
     let task;
     try {
       task = cronImpl.schedule(cronExpr, () => {
+        if (stopped) return;
         runSingleFlight(pollPositions, { source: "scheduled" })
           .catch((err) => logger.error("[Datalastic] pollPositions 오류:", err));
       });
@@ -558,6 +675,12 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
     previousTasks.forEach((previous) => previous.stop());
     logger.info(`[Datalastic] 🕐 Scheduler started (cron: ${cronExpr})`);
     return true;
+  }
+
+  function clearSchedule() {
+    tasks.forEach((task) => task.stop());
+    tasks = [];
+    currentCron = null;
   }
 
   return {
@@ -619,6 +742,7 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
     },
 
     async start() {
+      if (stopped) return false;
       let cronExpr = "0 4,6,8,11,15,23 * * *";
       let enabled = true;
       try {
@@ -630,6 +754,7 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
         enabled = enabledConfig?.value !== "false";
       } catch {}
 
+      if (stopped) return false;
       if (!enabled) {
         logger.info("[Datalastic] Scheduler disabled by poll_enabled=false");
         return false;
@@ -645,14 +770,19 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
 
     /** 폴링 스케줄 동적 변경 */
     reload(newCronExpr) {
+      if (stopped) return false;
       logger.info(`[Datalastic] cron 변경: ${currentCron} → ${newCronExpr}`);
       return startCron(newCronExpr);
     },
 
+    pause() {
+      clearSchedule();
+      logger.info("[Datalastic] Scheduler paused");
+    },
+
     stop() {
-      tasks.forEach((t) => t.stop());
-      tasks = [];
-      currentCron = null;
+      stopped = true;
+      clearSchedule();
       logger.info("[Datalastic] Scheduler stopped");
     },
 
@@ -669,7 +799,7 @@ export function createDatalasticPoller(prisma, onPosition, onVesselUpdate, onZon
     },
 
     getRunState() {
-      return { running: Boolean(activeRun), source: activeSource, startedAt: activeStartedAt };
+      return { running: Boolean(activeRun), stopped, source: activeSource, startedAt: activeStartedAt };
     },
   };
 }

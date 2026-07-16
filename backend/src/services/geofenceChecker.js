@@ -221,7 +221,6 @@ export class GeofenceChecker {
     for (const zoneName of currentZones) {
       if (!previousZones.has(zoneName)) {
         events.push({ vesselId, zoneName, eventType: "entry", lat, lon, posTimestamp });
-        console.log(`[Geofence] 🔴 ENTRY  ${displayName} → ${zoneName}`);
       }
     }
 
@@ -229,23 +228,31 @@ export class GeofenceChecker {
     for (const zoneName of previousZones) {
       if (!currentZones.has(zoneName)) {
         events.push({ vesselId, zoneName, eventType: "exit", lat, lon, posTimestamp });
-        console.log(`[Geofence] 🟢 EXIT   ${displayName} ← ${zoneName}`);
       }
     }
 
-    // DB 저장 (실패해도 위치 저장 영향 없음)
-    for (const ev of events) {
-      try {
-        await prisma.zoneEvent.create({ data: ev });
-      } catch (e) {
-        console.error("[Geofence] zoneEvent.create error:", e.message);
-      }
+    let persistedEvents = [];
+    try {
+      persistedEvents = await prisma.$transaction(async (tx) => {
+        const saved = [];
+        for (const event of events) {
+          saved.push(await tx.zoneEvent.create({ data: event }));
+        }
+        return saved;
+      });
+    } catch (e) {
+      console.error("[Geofence] zoneEvent transaction error:", e.message);
+      return [];
     }
 
-    // in-memory 상태 업데이트
+    for (const event of events) {
+      const marker = event.eventType === "entry" ? "🔴 ENTRY " : "🟢 EXIT  ";
+      const arrow = event.eventType === "entry" ? "→" : "←";
+      console.log(`[Geofence] ${marker} ${displayName} ${arrow} ${event.zoneName}`);
+    }
     this.vesselZoneState.set(vesselId, currentZones);
 
-    return events;
+    return persistedEvents;
   }
 
   /** 선박의 현재 체류 구역 목록 반환 */

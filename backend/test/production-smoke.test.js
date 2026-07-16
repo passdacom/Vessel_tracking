@@ -129,7 +129,10 @@ test("production smoke retries bounded local readiness, validates TLS, and deriv
     assert.match(events, /-verify_hostname reviewed\.example/);
     assert.match(events, /-connect reviewed\.example:4443/);
     assert.match(events, /pm2 jlist/);
-    assert.match(events, /SMOKE_WS_URL=ws:\/\/127\.0\.0\.1:5173\/ws\?token=invalid-production-smoke/);
+    assert.match(events, /SMOKE_WS_URL=ws:\/\/127\.0\.0\.1:5173\/ws$/m);
+    const script = readFileSync(smokeScript, "utf8");
+    assert.doesNotMatch(script, /token=invalid-production-smoke/);
+    assert.match(script, /new WebSocket\(process\.env\.SMOKE_WS_URL, \['vessel-auth', 'invalid-production-smoke'\]\)/);
   } finally {
     rmSync(fixture.sandbox, { recursive: true, force: true });
   }
@@ -141,7 +144,7 @@ test("production smoke derives a secure WebSocket URL from an HTTPS BASE_URL", (
     const result = runSmoke(fixture, { BASE_URL: "https://local.reviewed:7443" });
     assert.equal(result.status, 0, result.stderr);
     const events = readFileSync(fixture.eventLog, "utf8");
-    assert.match(events, /SMOKE_WS_URL=wss:\/\/local\.reviewed:7443\/ws\?token=invalid-production-smoke/);
+    assert.match(events, /SMOKE_WS_URL=wss:\/\/local\.reviewed:7443\/ws$/m);
     assert.doesNotMatch(events, /ws:\/\/127\.0\.0\.1:5173\/ws/);
   } finally {
     rmSync(fixture.sandbox, { recursive: true, force: true });

@@ -68,7 +68,7 @@ except ValueError:
 base_path = parsed.path.rstrip("/")
 base_url = urlunsplit((parsed.scheme, parsed.netloc, base_path, "", ""))
 ws_scheme = "wss" if parsed.scheme == "https" else "ws"
-ws_url = urlunsplit((ws_scheme, parsed.netloc, f"{base_path}/ws", "token=invalid-production-smoke", ""))
+ws_url = urlunsplit((ws_scheme, parsed.netloc, f"{base_path}/ws", "", ""))
 print(base_url, ws_url)
 PY
 )
@@ -179,7 +179,7 @@ print(f"[OK] local war-risk-zone.geojson type={body.get('type')}")
 PY
 
 SMOKE_WS_URL="$SMOKE_WS_URL" node - <<'NODE'
-const ws = new WebSocket(process.env.SMOKE_WS_URL);
+const ws = new WebSocket(process.env.SMOKE_WS_URL, ['vessel-auth', 'invalid-production-smoke']);
 const timer = setTimeout(() => { console.error('[FAIL] websocket invalid-token close timeout'); process.exit(1); }, 5000);
 ws.addEventListener('close', (ev) => {
   clearTimeout(timer);

@@ -8,6 +8,10 @@ function busyResponse(res, run) {
   });
 }
 
+function stoppedResponse(res) {
+  return res.status(503).json({ error: "Polling service stopped" });
+}
+
 export function createForceUpdateHandler({
   prisma,
   getPoller = (req) => req.app.locals.poller,
@@ -27,6 +31,7 @@ export function createForceUpdateHandler({
     if (!poller) return res.status(503).json({ error: "Polling service unavailable" });
 
     const currentRun = poller.getRunState();
+    if (currentRun.stopped) return stoppedResponse(res);
     if (currentRun.running) return busyResponse(res, currentRun);
 
     const { mmsiList } = req.body || {};
@@ -44,6 +49,7 @@ export function createForceUpdateHandler({
       });
     } catch (error) {
       if (error?.code === "POLL_BUSY") return busyResponse(res, error.runState);
+      if (error?.code === "POLL_STOPPED") return stoppedResponse(res);
       throw error;
     }
 

@@ -106,6 +106,8 @@ function runRollbackScenario({
   headFails = false,
   failMvAt = 0,
   failChmodAt = 0,
+  signalAfterMv = 0,
+  signalOnPm2Activation = false,
   pm2Inventory = [],
   pm2Home,
   extraEnv = {},
@@ -120,6 +122,7 @@ function runRollbackScenario({
   const eventLog = resolve(sandbox, "events.log");
   const mvCount = resolve(sandbox, "mv.count");
   const chmodCount = resolve(sandbox, "chmod.count");
+  const signalMarker = resolve(sandbox, "signal.sent");
   mkdirSync(resolve(repo, ".git"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   for (const release of [currentRelease, previousRelease]) {
@@ -136,8 +139,14 @@ function runRollbackScenario({
   writeFileSync(resolve(previousRelease, ".vessel-release-sha"), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n");
   writeFileSync(resolve(currentRelease, ".vessel-readiness"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
   writeFileSync(resolve(previousRelease, ".vessel-readiness"), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n");
-  executable(resolve(currentRelease, "scripts/production-smoke.sh"), `#!/usr/bin/env bash\nprintf 'smoke current\\n' >> '${eventLog}'\n`);
-  executable(resolve(previousRelease, "scripts/production-smoke.sh"), `#!/usr/bin/env bash\nprintf 'smoke previous\\n' >> '${eventLog}'\n`);
+  executable(resolve(currentRelease, "scripts/production-smoke.sh"), `#!/usr/bin/env bash
+printf 'smoke current\\n' >> '${eventLog}'
+printf 'smoke environment EXTERNAL_URL=%s BASE_URL=%s UNRELATED_SENTINEL=%s\\n' "\${EXTERNAL_URL:-unset}" "\${BASE_URL:-unset}" "\${UNRELATED_SENTINEL:-unset}" >> '${eventLog}'
+`);
+  executable(resolve(previousRelease, "scripts/production-smoke.sh"), `#!/usr/bin/env bash
+printf 'smoke previous\\n' >> '${eventLog}'
+printf 'smoke environment EXTERNAL_URL=%s BASE_URL=%s UNRELATED_SENTINEL=%s\\n' "\${EXTERNAL_URL:-unset}" "\${BASE_URL:-unset}" "\${UNRELATED_SENTINEL:-unset}" >> '${eventLog}'
+`);
   symlinkSync(currentRelease, resolve(releaseRoot, "current"));
   symlinkSync(previousRelease, resolve(releaseRoot, "previous"));
 
@@ -165,15 +174,23 @@ if [[ -n "\${VESSEL_BACKEND_ENV_FILE:-}" ]]; then
   printf 'pm2 backend env path set\\n' >> '${eventLog}'
 fi
 printf 'pm2 %s\\n' "$*" >> '${eventLog}'
+if [[ '${signalOnPm2Activation ? "yes" : "no"}' == 'yes' && "$1" == 'startOrReload' && ! -f '${signalMarker}' ]]; then
+  touch '${signalMarker}'
+  kill -TERM "$PPID"
+fi
 `);
-  if (failMvAt > 0) {
+  if (failMvAt > 0 || signalAfterMv > 0) {
     executable(resolve(bin, "mv"), `#!/usr/bin/env bash
 count=0
 [[ -f '${mvCount}' ]] && count="$(<'${mvCount}')"
 count=$((count + 1))
 printf '%s\\n' "$count" > '${mvCount}'
 if [[ "$count" == '${failMvAt}' ]]; then exit 42; fi
-exec /bin/mv "$@"
+/bin/mv "$@"
+if [[ "$count" == '${signalAfterMv}' && ! -f '${signalMarker}' ]]; then
+  touch '${signalMarker}'
+  kill -TERM "$PPID"
+fi
 `);
   }
   if (failChmodAt > 0) {
@@ -336,6 +353,61 @@ test("manifest finalization failure restores the previously active release", () 
     assert.notEqual(fixture.result.status, 0);
     assert.equal(realpathSync(resolve(fixture.releaseRoot, "current")), fixture.currentRelease);
     assert.equal(realpathSync(resolve(fixture.releaseRoot, "previous")), fixture.previousRelease);
+  } finally {
+    rmSync(fixture.sandbox, { recursive: true, force: true });
+  }
+});
+
+test("SIGTERM after either atomic link mutation restores both links exactly once", () => {
+  for (const signalAfterMv of [1, 2]) {
+    const fixture = runRollbackScenario({ signalAfterMv });
+    try {
+      assert.equal(fixture.result.status, 143, fixture.result.stderr);
+      assert.equal(realpathSync(resolve(fixture.releaseRoot, "current")), fixture.currentRelease);
+      assert.equal(realpathSync(resolve(fixture.releaseRoot, "previous")), fixture.previousRelease);
+      const events = readFileSync(fixture.eventLog, "utf8");
+      assert.equal((events.match(/^smoke current$/gm) || []).length, 1, events);
+      assert.doesNotMatch(events, /reload all|delete all|pm2 kill/);
+      const manifests = regularFiles(resolve(fixture.releaseRoot, "manifests"));
+      assert.equal(manifests.length, 1);
+      assert.match(readFileSync(manifests[0], "utf8"), /result=failed/);
+    } finally {
+      rmSync(fixture.sandbox, { recursive: true, force: true });
+    }
+  }
+});
+
+test("SIGTERM when PM2 activation begins restores links and vessel-only PM2 state", () => {
+  const fixture = runRollbackScenario({ signalOnPm2Activation: true });
+  try {
+    assert.equal(fixture.result.status, 143, fixture.result.stderr);
+    assert.equal(realpathSync(resolve(fixture.releaseRoot, "current")), fixture.currentRelease);
+    assert.equal(realpathSync(resolve(fixture.releaseRoot, "previous")), fixture.previousRelease);
+    const events = readFileSync(fixture.eventLog, "utf8");
+    assert.match(events, /smoke current/);
+    assert.match(events, /pm2 save/);
+    assert.doesNotMatch(events, /reload all|delete all|pm2 kill/);
+  } finally {
+    rmSync(fixture.sandbox, { recursive: true, force: true });
+  }
+});
+
+test("release activation smoke pins the canonical public origin and drops caller environment", () => {
+  const fixture = runRollbackScenario({
+    extraEnv: {
+      EXTERNAL_URL: "https://attacker.invalid",
+      BASE_URL: "https://attacker.invalid/local",
+      UNRELATED_SENTINEL: "must-not-reach-smoke",
+    },
+  });
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stderr);
+    const events = readFileSync(fixture.eventLog, "utf8");
+    assert.match(
+      events,
+      /smoke environment EXTERNAL_URL=https:\/\/vessel\.ttacom\.net BASE_URL=http:\/\/127\.0\.0\.1:5173 UNRELATED_SENTINEL=unset/,
+    );
+    assert.doesNotMatch(events, /attacker\.invalid|must-not-reach-smoke/);
   } finally {
     rmSync(fixture.sandbox, { recursive: true, force: true });
   }

@@ -12,6 +12,24 @@ function waitForOpen(ws) {
   });
 }
 
+function nextClose(ws, timeoutMs = 1_000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("close timeout"));
+    }, timeoutMs);
+    const onClose = (code, reason) => {
+      cleanup();
+      resolve({ code, reason: reason.toString() });
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      ws.off("close", onClose);
+    };
+    ws.once("close", onClose);
+  });
+}
+
 function nextMessage(ws, timeoutMs = 200) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -96,7 +114,7 @@ test("tenant-owned position broadcasts never reach another authenticated tenant"
   }
 });
 
-test("query token remains a transition fallback and invalid protocol token closes unauthorized", async () => {
+test("query token and invalid protocol token both close unauthorized", async () => {
   const httpServer = createServer();
   const wsServer = createWsServer(httpServer, {});
   const token = createSession("tenant-fallback", "user");
@@ -106,16 +124,35 @@ test("query token remains a transition fallback and invalid protocol token close
   const unauthorized = new WebSocket(`ws://127.0.0.1:${port}/ws`, ["vessel-auth", "invalid-session"]);
 
   try {
-    await waitForOpen(fallback);
-    assert.equal(fallback.protocol, "");
-    const closed = new Promise((resolve) => {
-      unauthorized.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
-    });
-    await waitForOpen(unauthorized);
-    assert.deepEqual(await closed, { code: 1008, reason: "Unauthorized" });
+    const fallbackClosed = nextClose(fallback);
+    const protocolClosed = nextClose(unauthorized);
+    await Promise.all([waitForOpen(fallback), waitForOpen(unauthorized)]);
+    assert.deepEqual(await fallbackClosed, { code: 1008, reason: "Unauthorized" });
+    assert.deepEqual(await protocolClosed, { code: 1008, reason: "Unauthorized" });
   } finally {
     await Promise.all([closeSocket(fallback), closeSocket(unauthorized)]);
     invalidateAccount("tenant-fallback");
+    await wsServer.close();
+    await new Promise((resolve, reject) => httpServer.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("an authenticated WebSocket closes when its session TTL expires", async () => {
+  const httpServer = createServer();
+  const wsServer = createWsServer(httpServer, {}, { heartbeatIntervalMs: 5 });
+  const token = createSession("tenant-expiring", "user", { ttlMs: 100 });
+  await new Promise((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
+  const { port } = httpServer.address();
+  const client = new WebSocket(`ws://127.0.0.1:${port}/ws`, ["vessel-auth", token]);
+
+  try {
+    const closed = nextClose(client);
+    await waitForOpen(client);
+    assert.equal(client.protocol, "vessel-auth");
+    assert.deepEqual(await closed, { code: 1008, reason: "Session expired" });
+  } finally {
+    await closeSocket(client);
+    invalidateAccount("tenant-expiring");
     await wsServer.close();
     await new Promise((resolve, reject) => httpServer.close((error) => error ? reject(error) : resolve()));
   }

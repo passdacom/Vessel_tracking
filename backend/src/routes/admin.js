@@ -367,13 +367,13 @@ export default function adminRoutes(prisma) {
       const poller = req.app.locals.poller;
       if (poller && poll_cron) {
         if (poll_enabled === false || poll_enabled === "false") {
-          poller.stop();
+          poller.pause();
           logger.info("[Admin] 폴링 비활성화");
         } else {
           poller.reload(String(poll_cron).trim());
         }
       } else if (poller && poll_enabled === false) {
-        poller.stop();
+        poller.pause();
         logger.info("[Admin] 폴링 비활성화");
       } else if (poller && poll_enabled === true && poll_cron === undefined) {
         // enabled만 바뀐 경우 현재 cron으로 재시작

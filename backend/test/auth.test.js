@@ -7,6 +7,7 @@ import {
   authenticateCredentials,
   clearAccountCache,
 } from "../src/accounts.js";
+import * as sessionStore from "../src/sessions.js";
 import {
   hashPassword,
   isPasswordHash,
@@ -116,6 +117,21 @@ test("password bearer is rejected while a session token authenticates", async ()
   assert.deepEqual(await authenticate(prisma, token), { name: "tenant-a", role: "user" });
   invalidateAccount("tenant-a");
   assert.equal(await authenticate(prisma, token), null);
+});
+
+test("session details expose expiry without changing the normal auth principal", async () => {
+  const token = createSession("tenant-expiry", "user", { ttlMs: 1_000 });
+
+  try {
+    const details = sessionStore.getSessionDetails(token);
+    assert.deepEqual(Object.keys(details).sort(), ["expiresAt", "name", "role"]);
+    assert.equal(details.name, "tenant-expiry");
+    assert.equal(details.role, "user");
+    assert.ok(details.expiresAt > Date.now());
+    assert.deepEqual(await authenticate({}, token), { name: "tenant-expiry", role: "user" });
+  } finally {
+    invalidateAccount("tenant-expiry");
+  }
 });
 
 test("admin account create and password update persist hashes, then deletion revokes sessions and WS", async () => {

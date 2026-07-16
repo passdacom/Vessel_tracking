@@ -1,6 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { parse } from 'url';
-import { authenticate } from '../accounts.js';
+import { getSessionDetails } from '../sessions.js';
 
 const AUTH_PROTOCOL = 'vessel-auth';
 const TENANT_EVENT_TYPES = new Set(["position", "vessel_updated", "zone_event"]);
@@ -19,41 +18,47 @@ export function getWsProtocolToken(req) {
   return tokens.length === 1 ? tokens[0] : null;
 }
 
-export function createWsServer(httpServer, prisma) {
+export function createWsServer(httpServer, _prisma, { heartbeatIntervalMs = 25_000 } = {}) {
   const wss = new WebSocketServer({
     server: httpServer,
     path: '/ws',
     handleProtocols: selectWsProtocol,
   });
   const clients = new Map();
+  const heartbeatMs = Math.max(1, Number(heartbeatIntervalMs) || 25_000);
 
   const heartbeatInterval = setInterval(() => {
-    for (const [client] of clients) {
+    const now = Date.now();
+    for (const [client, session] of clients) {
+      if (now >= session.expiresAt) {
+        clients.delete(client);
+        if (client.readyState < 2) client.close(1008, 'Session expired');
+        continue;
+      }
       if (client.readyState === 1) {
         client.ping();
       }
     }
-  }, 25000);
+  }, heartbeatMs);
 
   wss.on('close', () => clearInterval(heartbeatInterval));
 
   wss.on('connection', async (ws, req) => {
     const connectedAt = Date.now();
-    const { query } = parse(req.url, true);
-    const token = getWsProtocolToken(req) || query.token;
-    const account = token ? await authenticate(prisma, token) : null;
-    if (!account) {
+    const token = getWsProtocolToken(req);
+    const session = token ? getSessionDetails(token) : null;
+    if (!session) {
       ws.close(1008, 'Unauthorized');
       return;
     }
-    console.log(`[WS] Client connected (${account.name})`);
-    clients.set(ws, account);
+    console.log(`[WS] Client connected (${session.name})`);
+    clients.set(ws, session);
 
     ws.on('close', (code, reason) => {
       clients.delete(ws);
       const durationMs = Date.now() - connectedAt;
       console.log(
-        `[WS] Client disconnected (${account.name}) code=${code} reason=${reason?.toString() || ''} durationMs=${durationMs}`
+        `[WS] Client disconnected (${session.name}) code=${code} reason=${reason?.toString() || ''} durationMs=${durationMs}`
       );
     });
     ws.on('error', (err) => {

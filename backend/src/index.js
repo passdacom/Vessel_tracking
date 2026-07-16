@@ -176,7 +176,7 @@ async function init() {
   geofenceChecker.loadZones();
   await geofenceChecker.initState(prisma, handleZoneEvent);
 
-  datalasticPoller.start();
+  await datalasticPoller.start();
 
   const accountCount = await prisma.account.count();
   if (accountCount === 0 && process.env.ACCOUNTS) {

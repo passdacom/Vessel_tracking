@@ -1,8 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { createGracefulShutdown } from "../src/shutdown.js";
 import { installRuntimeHandlers } from "../src/runtime.js";
+
+test("startup awaits asynchronous poller initialization before continuing", () => {
+  const indexSource = readFileSync(fileURLToPath(new URL("../src/index.js", import.meta.url)), "utf8");
+  assert.match(indexSource, /await datalasticPoller\.start\(\);/);
+});
 
 test("graceful shutdown stops intake, drains active work, disconnects Prisma, then exits", async () => {
   const events = [];

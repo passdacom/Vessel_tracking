@@ -1,6 +1,6 @@
 # Vessel Tracking Production Runbook
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 ## Current production shape
 
@@ -46,7 +46,7 @@ Stop if the env-file ownership/mode check or resolved Compose config differs fro
 
 ## One-time Prisma baseline gate (existing production database)
 
-The repository now contains a full baseline migration plus an additive index migration. A database that existed before migration history was introduced must be baselined once. This writes migration metadata, so take a verified backup and obtain the Human Gate approval first.
+The repository now contains a full baseline migration plus an additive index migration. A database that existed before migration history was introduced must be baselined once. The release tool performs a read-only probe and fails closed before backup or database writes when Vessel/domain tables exist without a successful `20260715100000_baseline` row. It never runs `migrate resolve`. Baselining writes migration metadata, so take a separately verified backup and obtain the Human Gate approval first.
 
 ```bash
 cd /root/.openclaw/workspace/Vessel_tracking/backend
@@ -66,6 +66,10 @@ npx prisma migrate deploy
 ```
 
 Never use `prisma db push` for production releases. Fresh databases run the baseline normally; only an already-populated, schema-matched database uses `migrate resolve`.
+
+## Migration and rollback compatibility gate
+
+Database rollback is schema rollback-free: application rollback changes only the immutable release and PM2 processes, never migration history or schema. Therefore every migration after `20260715100000_baseline` must contain only additive idempotent `CREATE INDEX IF NOT EXISTS ...` or `CREATE UNIQUE INDEX IF NOT EXISTS ...` statements; SQL comments and empty statements are allowed. `ALTER`, `DROP`, `DELETE`, `UPDATE`, `TRUNCATE`, rename, constraints, table creation, and all other statements fail before backup or writes, including when deploying a prebuilt release. Any broader schema change requires a separately reviewed expand/contract deployment design.
 
 ## Backup and restore drill
 
@@ -92,7 +96,11 @@ test "${#REVIEWED_SHA}" -eq 40
 APPROVE_RELEASE=YES ./scripts/release.sh deploy "$REVIEWED_SHA"
 ```
 
-The release tool securely loads `DATABASE_URL` from `VESSEL_BACKEND_ENV_FILE` when it is not already present; do not source or print the secret file in an operator shell. Real deploy accepts only a full 40-hex immutable commit SHA and verifies that it resolves exactly to the reviewed commit; symbolic refs are allowed only for the side-effect-free dry-run. The fail-fast flow rejects dirty worktrees and builds the reviewed commit in an isolated staging directory. It runs tests/build/Prisma validation and a read-only migration plan before the verified database backup, records the dump SHA-256 and manifest, runs `prisma migrate deploy`, then atomically moves `current` to the versioned release. PM2 activation runs under a sanitized environment and only the two vessel apps are reloaded. Smoke checks must prove PM2 is executing the target behind `current`; a failed activation restores the old symlink and reloads the old release. A durable private manifest records timestamp, candidate SHA, release and previous paths, backup path/checksum, migration result, and smoke result.
+The release tool securely loads `DATABASE_URL` from `VESSEL_BACKEND_ENV_FILE` when it is not already present; do not source or print the secret file in an operator shell. Real deploy accepts only a full 40-hex immutable commit SHA and verifies that it resolves exactly to the reviewed commit; symbolic refs are allowed only for the side-effect-free dry-run. The fail-fast flow rejects dirty worktrees and builds the reviewed commit in an isolated staging directory. It runs tests/build/Prisma validation, the index-only migration contract, the read-only legacy-baseline probe, and a read-only migration plan before the verified database backup. It records the dump SHA-256 and manifest, runs `prisma migrate deploy`, then atomically moves `current` to the versioned release. PM2 activation and deploy/rollback smoke run under sanitized environments; release smoke always pins `BASE_URL=http://127.0.0.1:5173` and canonical `EXTERNAL_URL=https://vessel.ttacom.net`, ignoring caller overrides. Only the two vessel apps are reloaded. `INT`, `TERM`, and `HUP` after activation begins restore both release links, reactivate the old vessel-only PM2 state, rerun restored smoke, and record a failed manifest when possible. A durable private manifest records timestamp, candidate SHA, release and previous paths, backup path/checksum, migration result, and smoke result.
+
+## Human Gate: trusted reverse proxy address
+
+The checked-in Nginx example assumes the sole upstream TLS proxy connects over loopback and trusts only `127.0.0.1` and `::1` for real-IP reconstruction. It recursively resolves that trusted peer's `X-Forwarded-For`, then overwrites the downstream header with canonical `$remote_addr`. If the upstream proxy is moved to a non-loopback address, add only its explicit reviewed CIDR as a Human Gate change. Never configure `set_real_ip_from 0.0.0.0/0` or append arbitrary inbound forwarding chains.
 
 Password migration remains separately gated: run `npm --prefix backend run auth:migrate:dry-run`; apply with `auth:migrate:apply` only after reviewing the count and approving the data write.
 
@@ -164,7 +172,7 @@ logrotate -d /etc/logrotate.d/vessel-tracking
 
 ## Rollback
 
-Database migrations are additive and are not rolled back. Rollback selects the exact versioned target behind `previous`; it refuses to target the active `current` release and never applies a destructive down migration. It verifies the target and backup before switching `current`, then reloads only vessel apps and runs smoke checks:
+Database rollback is schema rollback-free. Only post-baseline index-only additive migrations are accepted, and rollback never reverses them. Rollback selects the exact versioned target behind `previous`; it refuses to target the active `current` release and never applies a destructive down migration. It verifies the target and backup before switching `current`, then reloads only vessel apps and runs smoke checks:
 
 ```bash
 APPROVE_ROLLBACK=YES ./scripts/release.sh rollback

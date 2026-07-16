@@ -403,6 +403,14 @@ test("release workflow is fail-fast and requires migration, reload, smoke, and r
   assert.match(nginx, /proxy_set_header Upgrade \$http_upgrade/);
   assert.match(nginx, /proxy_read_timeout 65s/);
   assert.match(nginx, /client_max_body_size 1m/);
+  assert.match(nginx, /^\s*set_real_ip_from 127\.0\.0\.1;$/m);
+  assert.match(nginx, /^\s*set_real_ip_from ::1;$/m);
+  assert.match(nginx, /^\s*real_ip_header X-Forwarded-For;$/m);
+  assert.match(nginx, /^\s*real_ip_recursive on;$/m);
+  assert.equal((nginx.match(/proxy_set_header X-Real-IP \$remote_addr;/g) || []).length, 3);
+  assert.equal((nginx.match(/proxy_set_header X-Forwarded-For \$remote_addr;/g) || []).length, 3);
+  assert.doesNotMatch(nginx, /\$proxy_add_x_forwarded_for|set_real_ip_from 0\.0\.0\.0\/0/);
+  assert.match(nginx, /non-loopback[\s\S]*explicit[\s\S]*CIDR/i);
 
   const runbook = read("docs/production-runbook.md");
   assert.match(runbook, /prisma migrate deploy/);

@@ -5,7 +5,7 @@ import { createDatalasticPoller } from "../src/services/datalasticPoller.js";
 
 function makePrisma() {
   const events = [];
-  return {
+  const prisma = {
     events,
     vessel: {
       async findMany() {
@@ -28,6 +28,8 @@ function makePrisma() {
       },
     },
   };
+  prisma.$transaction = async (work) => work(prisma);
+  return prisma;
 }
 
 test("restart recovery persists and replays a missing geofence entry exactly once", async () => {
@@ -51,6 +53,56 @@ test("restart recovery persists and replays a missing geofence entry exactly onc
   assert.equal(replayed[0].eventType, "entry");
   assert.equal(replayed[0].account, "tenant-a");
   assert.equal(replayed[0].vesselName, "Ship");
+});
+
+test("geofence transaction failure leaves state unchanged and retry commits all transitions once", async () => {
+  const checker = new GeofenceChecker();
+  checker.loaded = true;
+  checker.zones = ["A", "B"].map((name) => ({
+    name,
+    bbox: [0, 0, 10, 10],
+    geometry: { type: "Polygon", coordinates: [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]] },
+  }));
+  const persisted = [];
+  let failTransaction = true;
+  const prisma = {
+    async $transaction(work) {
+      const pending = [];
+      const tx = {
+        zoneEvent: {
+          async create({ data }) {
+            if (failTransaction && pending.length === 1) throw new Error("commit failed");
+            const event = { id: persisted.length + pending.length + 1, ...data };
+            pending.push(event);
+            return event;
+          },
+        },
+      };
+      try {
+        const result = await work(tx);
+        persisted.push(...pending);
+        return result;
+      } finally {
+        failTransaction = false;
+      }
+    },
+  };
+  const vessel = { id: 9, name: "Atomic", alias: null, mmsi: "900" };
+  const position = { lat: 5, lon: 5, timestamp: new Date("2026-01-01T00:00:00Z") };
+
+  const failed = await checker.detectAndSave(prisma, vessel, position);
+  assert.deepEqual(failed, []);
+  assert.deepEqual(checker.getCurrentZones(vessel.id), []);
+  assert.equal(persisted.length, 0);
+
+  const retried = await checker.detectAndSave(prisma, vessel, position);
+  const repeated = await checker.detectAndSave(prisma, vessel, position);
+
+  assert.equal(retried.length, 2);
+  assert.deepEqual(retried.map((event) => event.zoneName).sort(), ["A", "B"]);
+  assert.deepEqual(checker.getCurrentZones(vessel.id).sort(), ["A", "B"]);
+  assert.equal(persisted.length, 2);
+  assert.deepEqual(repeated, []);
 });
 
 test("historical outside-inside-outside points do not replay geofence transitions", async () => {
@@ -118,7 +170,7 @@ test("historical outside-inside-outside points do not replay geofence transition
 
   try {
     const poller = createDatalasticPoller(prisma, null, null, null, {
-      getCreditStatus: () => ({ remaining: 100 }),
+      getCreditStatus: () => ({ remaining: 100, checkedAt: new Date().toISOString() }),
       apiCallFn: async () => response,
     });
 

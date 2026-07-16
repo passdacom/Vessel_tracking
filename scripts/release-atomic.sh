@@ -4,6 +4,7 @@ umask 077
 
 ACTION="${1:-dry-run}"
 REQUESTED_REVISION="${2:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="${VESSEL_ROOT:-/root/.openclaw/workspace/Vessel_tracking}"
 RELEASE_ROOT="${VESSEL_RELEASE_ROOT:-/var/lib/vessel-tracking/app}"
 RELEASES_DIR="$RELEASE_ROOT/releases"
@@ -19,6 +20,9 @@ PG_CONTAINER="${PG_CONTAINER:-vessel_tracking-postgres-1}"
 PG_USER="${PG_USER:-vessel_user}"
 PG_DATABASE="${PG_DATABASE:-vessel_tracking}"
 PM2_BIN="${PM2_BIN:-pm2}"
+RELEASE_GATE_SCRIPT="$SCRIPT_DIR/release-gates.mjs"
+CANONICAL_EXTERNAL_URL="https://vessel.ttacom.net"
+LOCAL_BASE_URL="http://127.0.0.1:5173"
 
 workspace=""
 switched=0
@@ -31,6 +35,7 @@ backup_checksum="none"
 migration_status="not-started"
 smoke_status="not-run"
 manifest_path=""
+failure_handled=0
 
 usage() {
   printf 'Usage: %s [dry-run|deploy|rollback] [candidate-revision]\n' "$0" >&2
@@ -113,6 +118,36 @@ process.stdin.on("end", () => {
   fi
 }
 
+run_legacy_baseline_preflight() {
+  local probe domain_table_count migrations_table_exists baseline_succeeded="f"
+  probe="$(docker exec "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 \
+    -U "$PG_USER" -d "$PG_DATABASE" -At -F $'\t' -c '
+SELECT
+  count(*)::integer,
+  (to_regclass('"'"'public."_prisma_migrations"'"'"') IS NOT NULL)
+FROM information_schema.tables
+WHERE table_schema = '"'"'public'"'"'
+  AND table_type = '"'"'BASE TABLE'"'"'
+  AND table_name IN (
+    '"'"'Vessel'"'"', '"'"'Position'"'"', '"'"'Incident'"'"', '"'"'Port'"'"',
+    '"'"'Account'"'"', '"'"'VesselAccount'"'"', '"'"'SystemConfig'"'"', '"'"'ApiUsage'"'"',
+    '"'"'ZoneEvent'"'"', '"'"'SharedView'"'"', '"'"'ShippingLane'"'"'
+  );')"
+  IFS=$'\t' read -r domain_table_count migrations_table_exists <<< "$probe"
+  if [[ "$migrations_table_exists" == "t" ]]; then
+    baseline_succeeded="$(docker exec "$PG_CONTAINER" psql -X -v ON_ERROR_STOP=1 \
+      -U "$PG_USER" -d "$PG_DATABASE" -At -c '
+SELECT EXISTS (
+  SELECT 1 FROM "_prisma_migrations"
+  WHERE migration_name = '"'"'20260715100000_baseline'"'"'
+    AND finished_at IS NOT NULL
+    AND rolled_back_at IS NULL
+);')"
+  fi
+  printf '%s\t%s\t%s\n' "$domain_table_count" "$migrations_table_exists" "$baseline_succeeded" \
+    | node "$RELEASE_GATE_SCRIPT" baseline
+}
+
 write_manifest() {
   local result="$1" timestamp
   [[ -d "$MANIFEST_DIR" ]] || return 0
@@ -140,44 +175,74 @@ activate_current() {
     return 1
   }
   pm2_vessel startOrReload "$CURRENT_LINK/ecosystem.config.cjs" --update-env
-  EXPECTED_RELEASE_PATH="$expected" \
+  env -i \
+    PATH="$PATH" \
     PM2_HOME="$PM2_HOME" \
     VESSEL_BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
     VESSEL_DB_WAIT_MAX_MS="${VESSEL_DB_WAIT_MAX_MS:-120000}" \
+    EXPECTED_RELEASE_PATH="$expected" \
+    BASE_URL="$LOCAL_BASE_URL" \
+    EXTERNAL_URL="$CANONICAL_EXTERNAL_URL" \
     "$CURRENT_LINK/scripts/production-smoke.sh"
   pm2_vessel save
 }
 
 restore_after_failure() {
+  if [[ "$failure_handled" == "1" ]]; then return 0; fi
+  failure_handled=1
   trap - ERR
+  trap '' INT TERM HUP
   set +e
   if [[ "$switched" == "1" ]]; then
     if [[ -n "$old_current" ]]; then
       atomic_link "$old_current" "$CURRENT_LINK"
-      activate_current "$old_current"
     else
       rm -f "$CURRENT_LINK"
-      pm2_vessel delete vessel-backend vessel-frontend
     fi
     if [[ -n "$old_previous" ]]; then
       atomic_link "$old_previous" "$PREVIOUS_LINK"
     else
       rm -f "$PREVIOUS_LINK"
     fi
+    if [[ -n "$old_current" ]]; then
+      activate_current "$old_current"
+    else
+      pm2_vessel delete vessel-backend vessel-frontend
+      pm2_vessel save
+    fi
+    smoke_status="failed-restored-previous"
+  else
+    smoke_status="failed-before-activation"
   fi
-  smoke_status="failed-restored-previous"
   write_manifest "failed"
+  switched=0
+}
+
+cleanup_workspace() {
+  [[ -n "$workspace" ]] && rm -rf "$workspace"
+  return 0
 }
 
 on_error() {
   local code=$?
   restore_after_failure
-  [[ -n "$workspace" ]] && rm -rf "$workspace"
+  cleanup_workspace
   printf 'Release failed (exit %s); current was restored when activation had begun.\n' "$code" >&2
   exit "$code"
 }
+
+on_signal() {
+  local signal="$1" code="$2"
+  restore_after_failure
+  cleanup_workspace
+  printf 'Release interrupted by %s (exit %s); current was restored when activation had begun.\n' "$signal" "$code" >&2
+  exit "$code"
+}
 trap on_error ERR
-trap '[[ -n "$workspace" ]] && rm -rf "$workspace"' EXIT
+trap 'on_signal INT 130' INT
+trap 'on_signal TERM 143' TERM
+trap 'on_signal HUP 129' HUP
+trap cleanup_workspace EXIT
 
 [[ -d "$ROOT/.git" || -f "$ROOT/.git" ]] || { printf 'VESSEL_ROOT is not a Git worktree\n' >&2; exit 66; }
 for command in git npm npx docker "$PM2_BIN" curl sha256sum tar readlink node env install chmod; do
@@ -285,6 +350,8 @@ if [[ "$ACTION" == "deploy" && ! -d "$target_release" ]]; then
   npm --prefix "$stage/backend" run auth:migrate:dry-run
   printf '%s\n' "$candidate_sha" > "$stage/.vessel-readiness"
 
+  node "$RELEASE_GATE_SCRIPT" migrations "$stage/backend/prisma/migrations"
+  run_legacy_baseline_preflight
   # Read-only migration plan must complete before the first database backup/write.
   (cd "$stage/backend" && npx prisma migrate diff \
     --from-schema-datasource prisma/schema.prisma \
@@ -303,6 +370,10 @@ else
   [[ -d "$target_release/backend/node_modules/@prisma/client" ]]
   [[ -f "$target_release/ecosystem.config.cjs" ]]
   [[ -x "$target_release/scripts/production-smoke.sh" ]]
+  if [[ "$ACTION" == "deploy" ]]; then
+    node "$RELEASE_GATE_SCRIPT" migrations "$target_release/backend/prisma/migrations"
+    run_legacy_baseline_preflight
+  fi
   (cd "$target_release/backend" && npx prisma migrate diff \
     --from-schema-datasource prisma/schema.prisma \
     --to-schema-datamodel prisma/schema.prisma \
