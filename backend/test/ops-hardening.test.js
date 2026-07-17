@@ -15,10 +15,15 @@ import {
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { EventEmitter } from "node:events";
 import http from "node:http";
 import net from "node:net";
-import { buildAllowedEnv, loadBackendEnv, spawnBackend, waitForDb } from "../wait-for-db.js";
+import {
+  buildAllowedEnv,
+  isEntrypoint,
+  loadBackendEnv,
+  startBackendInProcess,
+  waitForDb,
+} from "../wait-for-db.js";
 import {
   createFrontendServer,
   parseRequestPath,
@@ -118,9 +123,29 @@ test("database launcher fails closed on a Prisma readiness query and uses an env
   assert.match(launcher, /PrismaClient/);
   assert.match(launcher, /SELECT 1/);
   assert.match(launcher, /BACKEND_ENV_ALLOWLIST/);
-  assert.match(launcher, /SIGTERM/);
-  assert.match(launcher, /SIGINT/);
-  assert.doesNotMatch(launcher, /from "net"|prisma generate|runPrismaGenerate|서버를 강제 시작/);
+  assert.match(launcher, /importBackend/);
+  assert.doesNotMatch(launcher, /child_process|spawnBackend|from "net"|prisma generate|runPrismaGenerate|서버를 강제 시작/);
+});
+
+test("database launcher recognizes its real PM2 fork entrypoint", () => {
+  const launcherPath = resolve(root, "backend/wait-for-db.js");
+  assert.equal(isEntrypoint({ argv: ["node", launcherPath], env: {} }), true);
+  assert.equal(isEntrypoint({
+    argv: ["node", "/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js"],
+    env: { pm_exec_path: launcherPath },
+  }), true);
+  assert.equal(isEntrypoint({
+    argv: ["node", "/usr/lib/node_modules/pm2/lib/ProcessContainerFork.js"],
+    env: {},
+  }), false);
+});
+
+test("production backend cannot repopulate sanitized env from an implicit dotenv import", () => {
+  const index = read("backend/src/index.js");
+  const packageJson = JSON.parse(read("backend/package.json"));
+  assert.doesNotMatch(index, /dotenv(?:\/config)?/);
+  assert.equal(packageJson.scripts.start, "node --import dotenv/config src/index.js");
+  assert.equal(packageJson.scripts.dev, "node --watch --import dotenv/config src/index.js");
 });
 
 test("frontend server exports a bounded protocol-aware server factory", () => {
@@ -175,7 +200,7 @@ test("database launcher readiness is query-based, fail-closed, and disconnects",
   assert.equal(disconnects, 2);
 });
 
-test("database launcher passes only allowlisted env and forwards termination", () => {
+test("database launcher replaces inherited env with the strict backend allowlist", async () => {
   assert.deepEqual(
     buildAllowedEnv({
       DATABASE_URL: "db",
@@ -193,25 +218,26 @@ test("database launcher passes only allowlisted env and forwards termination", (
       VESSEL_LOG_DIR: "/tmp/vessel-logs",
     },
   );
-  const processRef = new EventEmitter();
-  processRef.execPath = "/usr/bin/node";
-  processRef.exitCode = undefined;
-  const child = new EventEmitter();
-  child.exitCode = null;
-  child.killed = false;
-  child.kill = (signal) => { child.forwarded = signal; };
-  let spawnOptions;
-  const returned = spawnBackend({
-    processRef,
+  const processEnv = {
+    PATH: "/usr/bin",
+    PM2_HOME: "/var/lib/vessel-tracking/pm2",
+    UNRELATED_SECRET: "drop-me",
+  };
+  let importedEnv;
+  const marker = { started: true };
+  const returned = await startBackendInProcess({
     env: { DATABASE_URL: "db", UNRELATED_SECRET: "drop-me" },
-    spawnFn: (_command, _args, options) => { spawnOptions = options; return child; },
+    processEnv,
+    importBackend: async () => {
+      importedEnv = { ...processEnv };
+      return marker;
+    },
   });
-  processRef.emit("SIGTERM");
-  assert.equal(returned, child);
-  assert.equal(child.forwarded, "SIGTERM");
-  assert.deepEqual(spawnOptions.env, { DATABASE_URL: "db" });
-  child.emit("exit", 0, null);
-  assert.equal(processRef.exitCode, 0);
+  assert.equal(returned, marker);
+  assert.deepEqual(importedEnv, { DATABASE_URL: "db" });
+  assert.deepEqual(processEnv, importedEnv);
+  assert.equal(processEnv.UNRELATED_SECRET, undefined);
+  assert.equal(processEnv.PM2_HOME, undefined);
 });
 
 test("database launcher securely loads the reviewed backend env file without retaining unrelated secrets", () => {

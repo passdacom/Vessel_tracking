@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import dotenv from "dotenv";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
@@ -123,28 +122,15 @@ export async function waitForDb({
   throw new Error(`database readiness timed out after ${maxWaitMs}ms`);
 }
 
-export function spawnBackend({
-  spawnFn = spawn,
+export async function startBackendInProcess({
   env = process.env,
-  processRef = process,
+  processEnv = process.env,
+  importBackend = () => import("./src/index.js"),
 } = {}) {
-  const child = spawnFn(processRef.execPath, ["src/index.js"], {
-    stdio: "inherit",
-    env: buildAllowedEnv(env),
-  });
-  const forwardSignal = (signal) => {
-    if (child.exitCode === null && !child.killed) child.kill(signal);
-  };
-  const onSigterm = () => forwardSignal("SIGTERM");
-  const onSigint = () => forwardSignal("SIGINT");
-  processRef.once("SIGTERM", onSigterm);
-  processRef.once("SIGINT", onSigint);
-  child.once("exit", (code, signal) => {
-    processRef.removeListener("SIGTERM", onSigterm);
-    processRef.removeListener("SIGINT", onSigint);
-    processRef.exitCode = code ?? (signal ? 1 : 0);
-  });
-  return child;
+  const allowedEnv = buildAllowedEnv(env);
+  for (const key of Object.keys(processEnv)) delete processEnv[key];
+  Object.assign(processEnv, allowedEnv);
+  return importBackend();
 }
 
 export async function main() {
@@ -163,10 +149,20 @@ export async function main() {
     "VESSEL_DB_WAIT_RETRY_MS",
   );
   await waitForDb({ env: runtimeEnv, maxWaitMs, retryIntervalMs });
-  return spawnBackend({ env: runtimeEnv });
+  return startBackendInProcess({ env: runtimeEnv });
 }
 
-const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+export function isEntrypoint({
+  argv = process.argv,
+  env = process.env,
+  self = fileURLToPath(import.meta.url),
+} = {}) {
+  return [argv[1], env.pm_exec_path]
+    .filter(Boolean)
+    .some((entry) => resolve(entry) === self);
+}
+
+const isMain = isEntrypoint();
 if (isMain) {
   main().catch((error) => {
     console.error(`[wait-for-db] startup blocked: ${error.message}`);
