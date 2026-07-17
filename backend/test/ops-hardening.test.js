@@ -26,6 +26,7 @@ import {
 } from "../wait-for-db.js";
 import {
   createFrontendServer,
+  isFrontendEntrypoint,
   parseRequestPath,
   selectBackendTransport,
 } from "../../frontend/server.mjs";
@@ -146,6 +147,13 @@ test("production backend cannot repopulate sanitized env from an implicit dotenv
   assert.doesNotMatch(index, /dotenv(?:\/config)?/);
   assert.equal(packageJson.scripts.start, "node --import dotenv/config src/index.js");
   assert.equal(packageJson.scripts.dev, "node --watch --import dotenv/config src/index.js");
+});
+
+test("frontend server recognizes direct and PM2 fork entrypoints", () => {
+  const serverPath = resolve(root, "frontend/server.mjs");
+  assert.equal(isFrontendEntrypoint({ argv: ["node", serverPath], env: {}, modulePath: serverPath }), true);
+  assert.equal(isFrontendEntrypoint({ argv: ["node", "/pm2/ProcessContainerFork.js"], env: { pm_exec_path: serverPath }, modulePath: serverPath }), true);
+  assert.equal(isFrontendEntrypoint({ argv: ["node", "/tmp/importer.mjs"], env: {}, modulePath: serverPath }), false);
 });
 
 test("frontend server exports a bounded protocol-aware server factory", () => {

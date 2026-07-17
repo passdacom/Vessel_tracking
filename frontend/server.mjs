@@ -241,5 +241,15 @@ export function startFrontendServer({
   return server;
 }
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) startFrontendServer();
+export function isFrontendEntrypoint({
+  argv = process.argv,
+  env = process.env,
+  modulePath = fileURLToPath(import.meta.url),
+} = {}) {
+  const resolvedModulePath = path.resolve(modulePath);
+  const directPath = argv[1] && path.resolve(argv[1]);
+  const pm2Path = env.pm_exec_path && path.resolve(env.pm_exec_path);
+  return directPath === resolvedModulePath || pm2Path === resolvedModulePath;
+}
+
+if (isFrontendEntrypoint()) startFrontendServer();
