@@ -80,6 +80,7 @@ exit 0
         VESSEL_BACKUP_DIR: resolve(releaseRoot, "backups"),
         PM2_BIN: "pm2",
         APPROVE_ROLLBACK: "YES",
+        APPROVE_PM2_REPLACEMENT: "YES",
         DATABASE_URL: "postgresql://placeholder.invalid/db",
       },
     });
@@ -110,6 +111,8 @@ function runRollbackScenario({
   signalAfterMv = 0,
   signalOnPm2Activation = false,
   pm2Inventory = [],
+  pm2StartFailure = "none",
+  pm2DeleteFailure = "none",
   pm2Home,
   extraEnv = {},
 } = {}) {
@@ -124,6 +127,8 @@ function runRollbackScenario({
   const mvCount = resolve(sandbox, "mv.count");
   const chmodCount = resolve(sandbox, "chmod.count");
   const signalMarker = resolve(sandbox, "signal.sent");
+  const pm2StartCount = resolve(sandbox, "pm2-start.count");
+  const pm2DeleteCount = resolve(sandbox, "pm2-delete.count");
   mkdirSync(resolve(repo, ".git"), { recursive: true });
   mkdirSync(bin, { recursive: true });
   for (const release of [currentRelease, previousRelease]) {
@@ -175,6 +180,24 @@ if [[ -n "\${VESSEL_BACKEND_ENV_FILE:-}" ]]; then
   printf 'pm2 backend env path set\\n' >> '${eventLog}'
 fi
 printf 'pm2 %s\\n' "$*" >> '${eventLog}'
+if [[ "$1" == 'start' ]]; then
+  count=0
+  [[ -f '${pm2StartCount}' ]] && count="$(<'${pm2StartCount}')"
+  count=$((count + 1))
+  printf '%s\\n' "$count" > '${pm2StartCount}'
+  if [[ '${pm2StartFailure}' == 'all' || ( '${pm2StartFailure}' == 'first' && "$count" == '1' ) ]]; then
+    exit 91
+  fi
+fi
+if [[ "$1" == 'delete' ]]; then
+  count=0
+  [[ -f '${pm2DeleteCount}' ]] && count="$(<'${pm2DeleteCount}')"
+  count=$((count + 1))
+  printf '%s\\n' "$count" > '${pm2DeleteCount}'
+  if [[ '${pm2DeleteFailure}' == 'all' || ( '${pm2DeleteFailure}' == 'first' && "$count" == '1' ) ]]; then
+    exit 92
+  fi
+fi
 if [[ '${signalOnPm2Activation ? "yes" : "no"}' == 'yes' && ( "$1" == 'delete' || "$1" == 'start' ) && ! -f '${signalMarker}' ]]; then
   touch '${signalMarker}'
   kill -TERM "$PPID"
@@ -216,6 +239,7 @@ exec /usr/bin/chmod "$@"
       PM2_BIN: "pm2",
       VESSEL_BACKEND_ENV_FILE: resolve(sandbox, "reviewed-backend.env"),
       APPROVE_ROLLBACK: "YES",
+      APPROVE_PM2_REPLACEMENT: "YES",
       DATABASE_URL: "postgresql://placeholder.invalid/db",
       ...(pm2Home ? { PM2_HOME: pm2Home } : {}),
       ...extraEnv,
@@ -230,6 +254,66 @@ test("failure during the second symlink mutation restores both release links", (
     assert.notEqual(fixture.result.status, 0);
     assert.equal(realpathSync(resolve(fixture.releaseRoot, "current")), fixture.currentRelease);
     assert.equal(realpathSync(resolve(fixture.releaseRoot, "previous")), fixture.previousRelease);
+  } finally {
+    rmSync(fixture.sandbox, { recursive: true, force: true });
+  }
+});
+
+test("active PM2 replacement requires separate maintenance approval before side effects", () => {
+  const fixture = runRollbackScenario({
+    extraEnv: { APPROVE_PM2_REPLACEMENT: "" },
+  });
+  try {
+    assert.equal(fixture.result.status, 65, fixture.result.stderr);
+    assert.match(fixture.result.stderr, /APPROVE_PM2_REPLACEMENT=YES/);
+    assert.equal(realpathSync(resolve(fixture.releaseRoot, "current")), fixture.currentRelease);
+    assert.equal(realpathSync(resolve(fixture.releaseRoot, "previous")), fixture.previousRelease);
+    assert.equal(existsSync(fixture.eventLog), false);
+  } finally {
+    rmSync(fixture.sandbox, { recursive: true, force: true });
+  }
+});
+
+test("an activation start failure restores the previous release and preserves the original error", () => {
+  const fixture = runRollbackScenario({ pm2StartFailure: "first" });
+  try {
+    assert.equal(fixture.result.status, 91, fixture.result.stderr);
+    assert.equal(realpathSync(resolve(fixture.releaseRoot, "current")), fixture.currentRelease);
+    const events = readFileSync(fixture.eventLog, "utf8");
+    assert.equal((events.match(/^pm2 start /gm) || []).length, 2, events);
+    assert.match(events, /smoke current/);
+    assert.doesNotMatch(fixture.result.stderr, /operator intervention required/);
+  } finally {
+    rmSync(fixture.sandbox, { recursive: true, force: true });
+  }
+});
+
+test("a partial delete command failure re-enters named replacement and restores service", () => {
+  const fixture = runRollbackScenario({
+    pm2Inventory: [{ name: "vessel-backend" }, { name: "vessel-frontend" }],
+    pm2DeleteFailure: "first",
+  });
+  try {
+    assert.equal(fixture.result.status, 92, fixture.result.stderr);
+    assert.equal(realpathSync(resolve(fixture.releaseRoot, "current")), fixture.currentRelease);
+    const events = readFileSync(fixture.eventLog, "utf8");
+    assert.equal((events.match(/^pm2 delete vessel-backend vessel-frontend$/gm) || []).length, 2, events);
+    assert.match(events, /smoke current/);
+  } finally {
+    rmSync(fixture.sandbox, { recursive: true, force: true });
+  }
+});
+
+test("a recovery start failure exits distinctly instead of claiming restoration", () => {
+  const fixture = runRollbackScenario({ pm2StartFailure: "all" });
+  try {
+    assert.equal(fixture.result.status, 70, fixture.result.stderr);
+    assert.match(fixture.result.stderr, /automatic recovery failed; operator intervention required/);
+    assert.doesNotMatch(fixture.result.stderr, /current was restored/);
+    assert.equal(realpathSync(resolve(fixture.releaseRoot, "current")), fixture.currentRelease);
+    const manifests = regularFiles(resolve(fixture.releaseRoot, "manifests"));
+    assert.equal(manifests.length, 1);
+    assert.match(readFileSync(manifests[0], "utf8"), /smoke_results=failed-recovery-failed/);
   } finally {
     rmSync(fixture.sandbox, { recursive: true, force: true });
   }

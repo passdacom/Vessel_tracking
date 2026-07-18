@@ -116,6 +116,7 @@ printf 'pm2 %s\\n' "$*" >> '${eventLog}'
       VESSEL_BACKUP_DIR: resolve(releaseRoot, "backups"),
       PM2_BIN: "pm2",
       APPROVE_RELEASE: "YES",
+      APPROVE_PM2_REPLACEMENT: "YES",
       DATABASE_URL: "postgresql://placeholder.invalid/db",
       VESSEL_BACKEND_ENV_FILE: backendEnvFile,
       EXTERNAL_URL: "https://attacker.invalid",

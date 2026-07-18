@@ -40,6 +40,7 @@ failure_handled=0
 usage() {
   printf 'Usage: %s [dry-run|deploy|rollback] [candidate-revision]\n' "$0" >&2
   printf 'Deploy requires APPROVE_RELEASE=YES; rollback requires APPROVE_ROLLBACK=YES.\n' >&2
+  printf 'Replacing active PM2 apps also requires APPROVE_PM2_REPLACEMENT=YES.\n' >&2
 }
 
 case "$ACTION" in
@@ -178,7 +179,7 @@ activate_current() {
     return 1
   }
 
-  inventory="$(pm2_vessel jlist --silent)"
+  inventory="$(pm2_vessel jlist --silent)" || return
   existing="$(printf '%s' "$inventory" | node -e '
 let input = "";
 process.stdin.on("data", (chunk) => { input += chunk; });
@@ -189,12 +190,12 @@ process.stdin.on("end", () => {
   process.stdout.write(["vessel-backend", "vessel-frontend"]
     .filter((name) => present.has(name)).join(" "));
 });
-')"
+')" || return
   if [[ -n "$existing" ]]; then
     read -r -a existing_apps <<< "$existing"
-    pm2_vessel delete "${existing_apps[@]}"
+    pm2_vessel delete "${existing_apps[@]}" || return
   fi
-  pm2_vessel start "$CURRENT_LINK/ecosystem.config.cjs" --update-env
+  pm2_vessel start "$CURRENT_LINK/ecosystem.config.cjs" --update-env || return
   env -i \
     PATH="$PATH" \
     PM2_HOME="$PM2_HOME" \
@@ -203,11 +204,12 @@ process.stdin.on("end", () => {
     EXPECTED_RELEASE_PATH="$expected" \
     BASE_URL="$LOCAL_BASE_URL" \
     EXTERNAL_URL="$CANONICAL_EXTERNAL_URL" \
-    "$CURRENT_LINK/scripts/production-smoke.sh"
-  pm2_vessel save
+    "$CURRENT_LINK/scripts/production-smoke.sh" || return
+  pm2_vessel save || return
 }
 
 restore_after_failure() {
+  local recovery_failed=0
   if [[ "$failure_handled" == "1" ]]; then return 0; fi
   failure_handled=1
   trap - ERR
@@ -215,27 +217,32 @@ restore_after_failure() {
   set +e
   if [[ "$switched" == "1" ]]; then
     if [[ -n "$old_current" ]]; then
-      atomic_link "$old_current" "$CURRENT_LINK"
+      atomic_link "$old_current" "$CURRENT_LINK" || recovery_failed=1
     else
-      rm -f "$CURRENT_LINK"
+      rm -f "$CURRENT_LINK" || recovery_failed=1
     fi
     if [[ -n "$old_previous" ]]; then
-      atomic_link "$old_previous" "$PREVIOUS_LINK"
+      atomic_link "$old_previous" "$PREVIOUS_LINK" || recovery_failed=1
     else
-      rm -f "$PREVIOUS_LINK"
+      rm -f "$PREVIOUS_LINK" || recovery_failed=1
     fi
     if [[ -n "$old_current" ]]; then
-      activate_current "$old_current"
+      activate_current "$old_current" || recovery_failed=1
     else
-      pm2_vessel delete vessel-backend vessel-frontend
-      pm2_vessel save
+      pm2_vessel delete vessel-backend vessel-frontend || recovery_failed=1
+      pm2_vessel save || recovery_failed=1
     fi
-    smoke_status="failed-restored-previous"
+    if [[ "$recovery_failed" == "0" ]]; then
+      smoke_status="failed-restored-previous"
+    else
+      smoke_status="failed-recovery-failed"
+    fi
   else
     smoke_status="failed-before-activation"
   fi
-  write_manifest "failed"
+  write_manifest "failed" || recovery_failed=1
   switched=0
+  return "$recovery_failed"
 }
 
 cleanup_workspace() {
@@ -244,17 +251,25 @@ cleanup_workspace() {
 }
 
 on_error() {
-  local code=$?
-  restore_after_failure
+  local code=$? recovery_failed=0
+  restore_after_failure || recovery_failed=1
   cleanup_workspace
+  if [[ "$recovery_failed" == "1" ]]; then
+    printf 'Release failed (exit %s) and automatic recovery failed; operator intervention required.\n' "$code" >&2
+    exit 70
+  fi
   printf 'Release failed (exit %s); current was restored when activation had begun.\n' "$code" >&2
   exit "$code"
 }
 
 on_signal() {
-  local signal="$1" code="$2"
-  restore_after_failure
+  local signal="$1" code="$2" recovery_failed=0
+  restore_after_failure || recovery_failed=1
   cleanup_workspace
+  if [[ "$recovery_failed" == "1" ]]; then
+    printf 'Release interrupted by %s and automatic recovery failed; operator intervention required.\n' "$signal" >&2
+    exit 70
+  fi
   printf 'Release interrupted by %s (exit %s); current was restored when activation had begun.\n' "$signal" "$code" >&2
   exit "$code"
 }
@@ -322,6 +337,10 @@ if [[ "$ACTION" == "deploy" && "${APPROVE_RELEASE:-}" != "YES" ]]; then
 fi
 if [[ "$ACTION" == "rollback" && "${APPROVE_ROLLBACK:-}" != "YES" ]]; then
   printf 'Refusing rollback without APPROVE_ROLLBACK=YES\n' >&2
+  exit 65
+fi
+if [[ "${APPROVE_PM2_REPLACEMENT:-}" != "YES" ]]; then
+  printf 'Refusing PM2 activation without APPROVE_PM2_REPLACEMENT=YES\n' >&2
   exit 65
 fi
 if [[ -z "${DATABASE_URL:-}" ]]; then
