@@ -1,6 +1,6 @@
 # Vessel Tracking Production Runbook
 
-Last updated: 2026-07-16
+Last updated: 2026-07-18
 
 ## Current production shape
 
@@ -93,10 +93,10 @@ cd /root/.openclaw/workspace/Vessel_tracking
 export VESSEL_BACKEND_ENV_FILE=/etc/vessel-tracking/vessel-tracking.env
 REVIEWED_SHA="$(git rev-parse HEAD)"
 test "${#REVIEWED_SHA}" -eq 40
-APPROVE_RELEASE=YES ./scripts/release.sh deploy "$REVIEWED_SHA"
+APPROVE_RELEASE=YES APPROVE_PM2_REPLACEMENT=YES ./scripts/release.sh deploy "$REVIEWED_SHA"
 ```
 
-The release tool securely loads `DATABASE_URL` from `VESSEL_BACKEND_ENV_FILE` when it is not already present; do not source or print the secret file in an operator shell. Real deploy accepts only a full 40-hex immutable commit SHA and verifies that it resolves exactly to the reviewed commit; symbolic refs are allowed only for the side-effect-free dry-run. The fail-fast flow rejects dirty worktrees and builds the reviewed commit in an isolated staging directory. It runs tests/build/Prisma validation, the index-only migration contract, the read-only legacy-baseline probe, and a read-only migration plan before the verified database backup. It records the dump SHA-256 and manifest, runs `prisma migrate deploy`, then atomically moves `current` to the versioned release. PM2 activation and deploy/rollback smoke run under sanitized environments; release smoke always pins `BASE_URL=http://127.0.0.1:5173` and canonical `EXTERNAL_URL=https://vessel.ttacom.net`, ignoring caller overrides. Only the two vessel apps are reloaded. `INT`, `TERM`, and `HUP` after activation begins restore both release links, reactivate the old vessel-only PM2 state, rerun restored smoke, and record a failed manifest when possible. A durable private manifest records timestamp, candidate SHA, release and previous paths, backup path/checksum, migration result, and smoke result.
+`APPROVE_PM2_REPLACEMENT=YES` is a separate maintenance approval for the bounded graceful deletion and restart of only `vessel-backend` and `vessel-frontend`; expect a brief interruption and session expiry. The release tool securely loads `DATABASE_URL` from `VESSEL_BACKEND_ENV_FILE` when it is not already present; do not source or print the secret file in an operator shell. Real deploy accepts only a full 40-hex immutable commit SHA and verifies that it resolves exactly to the reviewed commit; symbolic refs are allowed only for the side-effect-free dry-run. The fail-fast flow rejects dirty worktrees and builds the reviewed commit in an isolated staging directory. It runs tests/build/Prisma validation, the index-only migration contract, the read-only legacy-baseline probe, and a read-only migration plan before the verified database backup. It records the dump SHA-256 and manifest, runs `prisma migrate deploy`, then atomically moves `current` to the versioned release. PM2 activation and deploy/rollback smoke run under sanitized environments; release smoke always pins `BASE_URL=http://127.0.0.1:5173` and canonical `EXTERNAL_URL=https://vessel.ttacom.net`, ignoring caller overrides. Only the two vessel apps are replaced. `INT`, `TERM`, and `HUP` after activation begins restore both release links, reactivate the old vessel-only PM2 state, rerun restored smoke, and record a failed manifest when possible. A durable private manifest records timestamp, candidate SHA, release and previous paths, backup path/checksum, migration result, and smoke result.
 
 ## Human Gate: trusted reverse proxy address
 
@@ -175,7 +175,7 @@ logrotate -d /etc/logrotate.d/vessel-tracking
 Database rollback is schema rollback-free. Only post-baseline index-only additive migrations are accepted, and rollback never reverses them. Rollback selects the exact versioned target behind `previous`; it refuses to target the active `current` release and never applies a destructive down migration. It verifies the target and backup before switching `current`, then reloads only vessel apps and runs smoke checks:
 
 ```bash
-APPROVE_ROLLBACK=YES ./scripts/release.sh rollback
+APPROVE_ROLLBACK=YES APPROVE_PM2_REPLACEMENT=YES ./scripts/release.sh rollback
 ```
 
 If rollback smoke fails, the script atomically restores the prior `current` target and reactivates it; the failed revision must not remain active. Stop and inspect the generated failure manifest and PM2 logs rather than repeatedly restarting. Restore a database dump only for confirmed data corruption and only through the separately approved restore procedure.

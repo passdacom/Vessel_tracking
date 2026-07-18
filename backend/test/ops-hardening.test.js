@@ -431,6 +431,7 @@ test("release workflow is fail-fast and requires migration, reload, smoke, and r
   assert.match(release, /^umask 077$/m);
   assert.match(release, /VESSEL_PM2_MAINTENANCE_OVERRIDE/);
   assert.match(release, /APPROVE_PM2_MAINTENANCE/);
+  assert.match(release, /APPROVE_PM2_REPLACEMENT/);
   assert.ok(release.indexOf("prisma migrate diff") < release.indexOf("pg_dump"));
 
   const nginx = read("ops/nginx/vessel-tracking.conf.example");
@@ -454,6 +455,8 @@ test("release workflow is fail-fast and requires migration, reload, smoke, and r
   assert.match(runbook, /full 40-hex|40-character full SHA/i);
   assert.match(runbook, /VESSEL_PM2_MAINTENANCE_OVERRIDE/);
   assert.match(runbook, /APPROVE_PM2_MAINTENANCE/);
+  assert.match(runbook, /APPROVE_RELEASE=YES APPROVE_PM2_REPLACEMENT=YES/);
+  assert.match(runbook, /APPROVE_ROLLBACK=YES APPROVE_PM2_REPLACEMENT=YES/);
   assert.match(runbook, /0700/);
   assert.match(runbook, /0600/);
   assert.match(runbook, /frontend.*DATABASE_URL|DATABASE_URL.*frontend/i);
