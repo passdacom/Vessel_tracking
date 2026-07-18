@@ -171,12 +171,30 @@ write_manifest() {
 }
 
 activate_current() {
-  local expected="$1"
+  local expected="$1" inventory existing
+  local -a existing_apps=()
   [[ "$(resolve_link "$CURRENT_LINK")" == "$expected" ]] || {
     printf 'current symlink does not resolve to expected target\n' >&2
     return 1
   }
-  pm2_vessel startOrReload "$CURRENT_LINK/ecosystem.config.cjs" --update-env
+
+  inventory="$(pm2_vessel jlist --silent)"
+  existing="$(printf '%s' "$inventory" | node -e '
+let input = "";
+process.stdin.on("data", (chunk) => { input += chunk; });
+process.stdin.on("end", () => {
+  const apps = JSON.parse(input);
+  if (!Array.isArray(apps)) throw new Error("PM2 jlist did not return an array");
+  const present = new Set(apps.map((app) => String(app?.name || "")));
+  process.stdout.write(["vessel-backend", "vessel-frontend"]
+    .filter((name) => present.has(name)).join(" "));
+});
+')"
+  if [[ -n "$existing" ]]; then
+    read -r -a existing_apps <<< "$existing"
+    pm2_vessel delete "${existing_apps[@]}"
+  fi
+  pm2_vessel start "$CURRENT_LINK/ecosystem.config.cjs" --update-env
   env -i \
     PATH="$PATH" \
     PM2_HOME="$PM2_HOME" \
@@ -294,7 +312,7 @@ if [[ "$ACTION" == "dry-run" ]]; then
   printf 'DRY RUN (no filesystem, database, PM2, or network changes)\n'
   printf 'candidate_sha=%s\nrelease_path=%s\ncurrent_target=%s\nprevious_target=%s\n' \
     "$candidate_sha" "$target_release" "${old_current:-none}" "${old_previous:-none}"
-  printf 'plan=preflight -> isolated candidate build/test -> migration plan -> verified backup -> migrate deploy -> readiness -> atomic current switch -> vessel-only PM2 reload -> smoke -> pm2 save -> manifest\n'
+  printf 'plan=preflight -> isolated candidate build/test -> migration plan -> verified backup -> migrate deploy -> readiness -> atomic current switch -> vessel-only PM2 replace -> smoke -> pm2 save -> manifest\n'
   exit 0
 fi
 

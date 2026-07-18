@@ -62,7 +62,7 @@ test("failed rollback smoke restores current and never uses global PM2 operation
     executable(resolve(bin, "sha256sum"), "#!/usr/bin/env bash\nprintf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  %s\\n' \"$1\"\n");
     executable(resolve(bin, "pm2"), `#!/usr/bin/env bash
 if [[ "$1" == "jlist" ]]; then
-  printf '[]\\n'
+  printf '[{"name":"vessel-backend"},{"name":"vessel-frontend"}]\\n'
   exit 0
 fi
 printf 'pm2 %s\\n' "$*" >> '${eventLog}'
@@ -94,8 +94,9 @@ exit 0
     assert.ok(failedSmoke > -1, events.join("\n"));
     assert.ok(restoredSmoke > failedSmoke, events.join("\n"));
     assert.deepEqual(saves, [restoredSmoke + 1], events.join("\n"));
-    assert.match(events.join("\n"), /startOrReload .*current\/ecosystem\.config\.cjs --update-env/);
-    assert.doesNotMatch(events.join("\n"), /reload all|delete all|pm2 kill/);
+    assert.match(events.join("\n"), /pm2 delete vessel-backend vessel-frontend/);
+    assert.match(events.join("\n"), /pm2 start .*current\/ecosystem\.config\.cjs --update-env/);
+    assert.doesNotMatch(events.join("\n"), /startOrReload|reload all|delete all|pm2 kill/);
   } finally {
     rmSync(sandbox, { recursive: true, force: true });
   }
@@ -174,7 +175,7 @@ if [[ -n "\${VESSEL_BACKEND_ENV_FILE:-}" ]]; then
   printf 'pm2 backend env path set\\n' >> '${eventLog}'
 fi
 printf 'pm2 %s\\n' "$*" >> '${eventLog}'
-if [[ '${signalOnPm2Activation ? "yes" : "no"}' == 'yes' && "$1" == 'startOrReload' && ! -f '${signalMarker}' ]]; then
+if [[ '${signalOnPm2Activation ? "yes" : "no"}' == 'yes' && ( "$1" == 'delete' || "$1" == 'start' ) && ! -f '${signalMarker}' ]]; then
   touch '${signalMarker}'
   kill -TERM "$PPID"
 fi
