@@ -7,8 +7,10 @@ import {
   RISK_AREA_SECTIONS,
   allRiskAreaItems,
   applyItemVisibility,
+  applySectionAppearance,
   getCalendarStatus,
   isItemVisible,
+  resetSectionAppearance,
   shouldLoadSectionLayers,
 } from "./riskAreaCatalog.js";
 
@@ -33,10 +35,17 @@ test("catalog presents JWLA-033 as the visible baseline and JWLA-034 as a distin
   assert.equal(amendment.items.length, 1);
   assert.equal(amendment.items[0].layerKeys[0], "JWLA 034 Amendment - Red Sea 18N to 25.5N");
   assert.equal(amendment.items[0].defaultVisible, true);
+  assert.equal(amendment.color, "#facc15");
+  assert.equal(amendment.items[0].color, "#facc15");
   assert.equal(baseline.items.length, 22);
   assert.equal(baseline.defaultOpen, false);
+  assert.equal(baseline.color, "#ef4444");
   assert.ok(baseline.items.every((areaItem) => areaItem.defaultVisible === true));
+  assert.ok(baseline.items.every((areaItem) => areaItem.color === "#ef4444"));
   assert.match(baseline.label, /JWLA-033 Baseline/);
+
+  const areaPanelSource = fs.readFileSync(new URL("./AreaPanel.jsx", import.meta.url), "utf8");
+  assert.doesNotMatch(areaPanelSource, /색은 033 기준\/현재 backend 경보경계/);
 
   assert.equal(bySection("jwc-installations").items.length, 2);
   assert.equal(bySection("jwc-countries").items.length, 23);
@@ -91,6 +100,60 @@ test("only mapped layers can be toggled and compound items update every layer ke
 
   const pending = bySection("ibf-itf").items[0];
   assert.deepEqual(applyItemVisibility(off, pending, true), off);
+});
+
+test("section appearance updates every ready layer while preserving visibility", () => {
+  const baseline = bySection("contract-alerts");
+  const firstKey = baseline.items[0].layerKeys[0];
+  const secondKey = baseline.items[1].layerKeys[0];
+  const initial = {
+    [firstKey]: { visible: false, color: "#123456", opacity: 0.1 },
+    [secondKey]: { visible: true, color: "#654321", opacity: 0.2 },
+  };
+
+  const updated = applySectionAppearance(initial, baseline, {
+    color: "#ef4444",
+    opacity: 0.18,
+  });
+
+  for (const areaItem of baseline.items) {
+    for (const layerKey of areaItem.layerKeys) {
+      assert.equal(updated[layerKey].color, "#ef4444");
+      assert.equal(updated[layerKey].opacity, 0.18);
+    }
+  }
+  assert.equal(updated[firstKey].visible, false);
+  assert.equal(updated[secondKey].visible, true);
+});
+
+test("section reset restores each item default appearance while preserving visibility", () => {
+  const section = {
+    items: [
+      { dataStatus: "ready", layerKeys: ["a"], color: "#ef4444", opacity: 0.08 },
+      { dataStatus: "ready", layerKeys: ["b"], color: "#facc15", opacity: 0.22 },
+    ],
+  };
+  const initial = {
+    a: { visible: false, color: "#111111", opacity: 0.3, custom: "keep-a" },
+    b: { visible: true, color: "#222222", opacity: 0.4, custom: "keep-b" },
+  };
+
+  const reset = resetSectionAppearance(initial, section);
+
+  assert.deepEqual(reset.a, {
+    visible: false, color: "#ef4444", opacity: 0.08, custom: "keep-a",
+  });
+  assert.deepEqual(reset.b, {
+    visible: true, color: "#facc15", opacity: 0.22, custom: "keep-b",
+  });
+});
+
+test("risk settings modal has a bounded viewport height and an internal scroll region", () => {
+  const modalSource = fs.readFileSync(new URL("../components/ZoneSettingsPanel.jsx", import.meta.url), "utf8");
+  const areaPanelSource = fs.readFileSync(new URL("./AreaPanel.jsx", import.meta.url), "utf8");
+  assert.match(modalSource, /h-\[88dvh\]/);
+  assert.match(areaPanelSource, /data-testid="risk-settings-scroll"/);
+  assert.match(areaPanelSource, /overflow-y-auto/);
 });
 
 test("hidden country reference data loads only when a country is shown or focused", () => {
