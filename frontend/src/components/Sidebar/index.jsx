@@ -3,6 +3,7 @@ import VesselCard from "./VesselCard.jsx";
 import ApiUpdateModal from "../ApiUpdateModal.jsx";
 import ArchivedVesselsModal from "../ArchivedVesselsModal.jsx";
 import PortList from "./PortList.jsx";
+import AreaPanel from "../../riskAreas/AreaPanel.jsx";
 
 // 빠른 선택 버튼 (자주 사용)
 const TRACK_QUICK = [
@@ -37,11 +38,13 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     showLabels = true, onToggleLabels,
     customGroups = [],
     apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched, onOpenZoneSettings,
+    zoneSettings = {}, onZoneSettingsUpdate, onFocusArea,
     onStartEta,
     sidebarWidth = 288 }) {
 
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
     const [showArchiveModal, setShowArchiveModal] = useState(false);
+    const [activeSidebarTab, setActiveSidebarTab] = useState("vessels");
 
     // 지도에서 선박 클릭 시: 해당 선박이 속한 그룹을 펼치고 카드를 화면에 보이게 스크롤
     useEffect(() => {
@@ -163,6 +166,25 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                 </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-1 border-b border-gray-700 bg-gray-950/40 px-3 py-2">
+                <button
+                    type="button"
+                    onClick={() => setActiveSidebarTab("vessels")}
+                    className={`rounded-md py-1.5 text-xs font-semibold transition ${activeSidebarTab === "vessels" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+                >
+                    🚢 선박
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveSidebarTab("areas")}
+                    className={`rounded-md py-1.5 text-xs font-semibold transition ${activeSidebarTab === "areas" ? "bg-red-700 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+                >
+                    ◫ 지역
+                </button>
+            </div>
+
+            {activeSidebarTab === "vessels" ? (
+                <>
             <div className="px-3 py-2.5 border-b border-gray-700">
                 <div className="flex items-center gap-1.5">
                     {TRACK_QUICK.map((opt) => (
@@ -313,34 +335,49 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                 />
             )}
 
-            <div className="px-3 py-2.5 border-t border-gray-700">
-                <button
-                    onClick={onOpenZoneSettings}
-                    className="w-full py-2 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 bg-red-900 hover:bg-red-800 text-red-200 border border-red-700"
-                >
-                    <span style={{ fontSize: 13 }}>🔴</span>
-                    War Risk Zone 설정
-                </button>
-            </div>
-            <div className="px-3 py-3 border-t border-gray-700">
-                <button onClick={onOpenGuide} className="w-full py-2 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-200 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5">
-                    📖 사용자 매뉴얼
-                </button>
-                <div className="flex gap-1 mt-2">
-                    <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} className="flex-1 py-1.5 bg-green-900 hover:bg-green-800 border border-green-700 text-green-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
-                        🔄 API 강제 수신
-                    </button>
-                    <button onClick={onShowShare} className="flex-1 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
-                        🔗 공유 링크
-                    </button>
-                    <button onClick={() => window.print()} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="Export / Print Report">
-                        🖨️
-                    </button>
-                    <button onClick={onOpenSettings} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="설정">
-                        ⚙️
-                    </button>
+                </>
+            ) : (
+                <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="min-h-0 flex-1">
+                        <AreaPanel
+                            zoneSettings={zoneSettings}
+                            onUpdate={onZoneSettingsUpdate}
+                            onFocusArea={onFocusArea}
+                            compact
+                        />
+                    </div>
+                    <div className="border-t border-gray-700 px-3 py-2">
+                        <button
+                            type="button"
+                            onClick={onOpenZoneSettings}
+                            className="w-full rounded-lg border border-gray-600 bg-gray-800 py-1.5 text-[10px] font-semibold text-gray-300 transition hover:bg-gray-700"
+                        >
+                            색상·투명도 상세 설정
+                        </button>
+                    </div>
                 </div>
-            </div>
+            )}
+            {activeSidebarTab === "vessels" && (
+                <div className="px-3 py-3 border-t border-gray-700">
+                    <button onClick={onOpenGuide} className="w-full py-2 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-200 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5">
+                        📖 사용자 매뉴얼
+                    </button>
+                    <div className="flex gap-1 mt-2">
+                        <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} className="flex-1 py-1.5 bg-green-900 hover:bg-green-800 border border-green-700 text-green-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
+                            🔄 API 강제 수신
+                        </button>
+                        <button onClick={onShowShare} className="flex-1 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
+                            🔗 공유 링크
+                        </button>
+                        <button onClick={() => window.print()} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="Export / Print Report">
+                            🖨️
+                        </button>
+                        <button onClick={onOpenSettings} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="설정">
+                            ⚙️
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -352,11 +389,13 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
     showLabels = true, onToggleLabels,
     customGroups = [],
-    apiFetch, onStartPlayback, onHistoryFetched, onOpenZoneSettings, onStartEta }) {
+    apiFetch, onStartPlayback, onHistoryFetched, onOpenZoneSettings, onStartEta,
+    zoneSettings = {}, onZoneSettingsUpdate, onFocusArea }) {
 
     const [open, setOpen] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
     const [showArchiveModal, setShowArchiveModal] = useState(false);
+    const [activeMobileTab, setActiveMobileTab] = useState("vessels");
 
     const toggleCollapse = (groupName, e) => {
         if (e && e.target.closest('button')) return;
@@ -467,6 +506,24 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                 display: "flex",
                 flexDirection: "column"
             }}>
+                <div className="grid grid-cols-2 gap-1 border-b border-gray-700 px-3 py-2">
+                    <button
+                        type="button"
+                        onClick={() => setActiveMobileTab("vessels")}
+                        className={`rounded-md py-1.5 text-xs font-semibold ${activeMobileTab === "vessels" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400"}`}
+                    >
+                        🚢 선박
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveMobileTab("areas")}
+                        className={`rounded-md py-1.5 text-xs font-semibold ${activeMobileTab === "areas" ? "bg-red-700 text-white" : "bg-gray-800 text-gray-400"}`}
+                    >
+                        ◫ 지역
+                    </button>
+                </div>
+                {activeMobileTab === "vessels" ? (
+                    <>
                 <div style={{ padding: "12px 12px 6px", borderBottom: "1px solid #374151", flexShrink: 0 }}>
                     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                         {TRACK_QUICK.map((opt) => (
@@ -575,17 +632,38 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                         </button>
                     </div>
                 )}
+                    </>
+                ) : (
+                    <div className="min-h-0 flex-1">
+                        <AreaPanel
+                            zoneSettings={zoneSettings}
+                            onUpdate={onZoneSettingsUpdate}
+                            onFocusArea={onFocusArea}
+                            compact
+                        />
+                    </div>
+                )}
                 <div style={{ padding: "8px 12px", borderTop: "1px solid #374151", flexShrink: 0, display: "flex", gap: "6px" }}>
-                    <button onClick={() => window.print()} style={{
-                        flex: 1, padding: "8px", background: "#374151",
-                        color: "#d1d5db", border: "none", borderRadius: 8,
-                        fontSize: 12, fontWeight: 600, cursor: "pointer"
-                    }}>🖨 Print</button>
-                    <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} style={{
-                        flex: 1, padding: "8px", background: "#065f46",
-                        color: "#6ee7b7", border: "1px solid #047857", borderRadius: 8,
-                        fontSize: 12, fontWeight: 600, cursor: "pointer"
-                    }}>🔄 강제 수신</button>
+                    {activeMobileTab === "areas" ? (
+                        <button onClick={onOpenZoneSettings} style={{
+                            flex: 1, padding: "8px", background: "#374151",
+                            color: "#d1d5db", border: "1px solid #4b5563", borderRadius: 8,
+                            fontSize: 12, fontWeight: 600, cursor: "pointer"
+                        }}>색상·투명도 상세 설정</button>
+                    ) : (
+                        <>
+                            <button onClick={() => window.print()} style={{
+                                flex: 1, padding: "8px", background: "#374151",
+                                color: "#d1d5db", border: "none", borderRadius: 8,
+                                fontSize: 12, fontWeight: 600, cursor: "pointer"
+                            }}>🖨 Print</button>
+                            <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} style={{
+                                flex: 1, padding: "8px", background: "#065f46",
+                                color: "#6ee7b7", border: "1px solid #047857", borderRadius: 8,
+                                fontSize: 12, fontWeight: 600, cursor: "pointer"
+                            }}>🔄 강제 수신</button>
+                        </>
+                    )}
                 </div>
             </div>
             {showArchiveModal && (

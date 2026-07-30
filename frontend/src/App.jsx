@@ -230,6 +230,11 @@ function App() {
       return stored ? JSON.parse(stored) : {};
     } catch { return {}; }
   });
+  const [areaFocus, setAreaFocus] = useState(null);
+  const handleFocusArea = useCallback((key) => {
+    if (!key) return;
+    setAreaFocus((previous) => ({ key, requestId: (previous?.requestId || 0) + 1 }));
+  }, []);
 
   // New state for custom groups
   const [customGroups, setCustomGroups] = useState(() => {
@@ -595,6 +600,9 @@ function App() {
             showLabels={showLabels}
             onToggleLabels={handleToggleLabels}
             onOpenZoneSettings={() => setShowZoneSettings(true)}
+            zoneSettings={zoneSettings}
+            onZoneSettingsUpdate={setZoneSettings}
+            onFocusArea={handleFocusArea}
             customGroups={customGroups}
             selectedPort={selectedPort}
             onSelectPort={handleSelectPort}
@@ -693,6 +701,7 @@ function App() {
           panTrigger={panTrigger}
           onSelectVessel={handleSelectVessel}
           zoneSettings={zoneSettings}
+          focusArea={areaFocus}
           trackHours={trackHours}
           selectedPort={selectedPort}
           portPanTrigger={portPanTrigger}
@@ -755,6 +764,10 @@ function App() {
         <ZoneSettingsPanel
           zoneSettings={zoneSettings}
           onUpdate={setZoneSettings}
+          onFocusArea={(key) => {
+            handleFocusArea(key);
+            setShowZoneSettings(false);
+          }}
           onClose={() => setShowZoneSettings(false)}
         />
       )}

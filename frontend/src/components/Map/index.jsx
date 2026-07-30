@@ -248,6 +248,7 @@ export default function Map({
     panTrigger,
     onSelectVessel,
     zoneSettings,
+    focusArea,
     trackHours,
     selectedPort,
     portPanTrigger,
@@ -285,7 +286,7 @@ export default function Map({
                 maxZoom={19}
             />
             <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} selectedPort={selectedPort} portPanTrigger={portPanTrigger} />
-            <RestrictedZone zoneSettings={zoneSettings} />
+            <RestrictedZone zoneSettings={zoneSettings} focusArea={focusArea} />
             <ZoomListener setZoom={setZoom} />
             <LabelDirectionComputer
                 vessels={vessels}
