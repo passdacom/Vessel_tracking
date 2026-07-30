@@ -164,7 +164,7 @@ const CONTRACT_ALERT_ITEMS = Object.entries(CONTRACT_ALERT_FILES).flatMap(([sour
     badge: "BACKEND",
     note: `JWLA-033-era baseline from ${sourceFile}; this is also the boundary currently used by the backend geofence. Display controls do not change alert rules.`,
     defaultVisible: true,
-    color: "#38bdf8",
+    color: "#ef4444",
     opacity: 0.08,
     sourceUrl: null,
     sourceFile,
@@ -277,7 +277,7 @@ export const RISK_AREA_SECTIONS = Object.freeze([
     countLabel: "22 areas · backend alert basis",
     description: "Restored JWLA-033-era map baseline. These exact boundaries are also used by the backend entry/exit checker; display controls do not change server alert rules.",
     defaultOpen: false,
-    color: "#38bdf8",
+    color: "#ef4444",
     items: CONTRACT_ALERT_ITEMS,
   },
   {
@@ -374,6 +374,36 @@ export function applyItemVisibility(settings, areaItem, visible) {
       ...settings[key],
       visible,
     };
+  }
+  return next;
+}
+
+export function applySectionAppearance(settings, section, patch) {
+  const next = { ...settings };
+  for (const areaItem of section?.items || []) {
+    if (areaItem.dataStatus !== "ready" || !areaItem.layerKeys?.length) continue;
+    for (const layerKey of areaItem.layerKeys) {
+      next[layerKey] = {
+        ...getLayerDefaults(layerKey),
+        ...settings[layerKey],
+        ...patch,
+      };
+    }
+  }
+  return next;
+}
+
+export function resetSectionAppearance(settings, section) {
+  const next = { ...settings };
+  for (const areaItem of section?.items || []) {
+    if (areaItem.dataStatus !== "ready" || !areaItem.layerKeys?.length) continue;
+    for (const layerKey of areaItem.layerKeys) {
+      next[layerKey] = {
+        ...settings[layerKey],
+        color: areaItem.color,
+        opacity: areaItem.opacity,
+      };
+    }
   }
   return next;
 }

@@ -4,12 +4,12 @@ import AreaPanel from "../riskAreas/AreaPanel.jsx";
 export default function ZoneSettingsPanel({ zoneSettings, onUpdate, onClose, onFocusArea }) {
   return (
     <div
-      className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-[2000] flex items-center justify-center overflow-hidden bg-black/50 p-2 sm:p-4"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="flex max-h-[88vh] w-[94vw] max-w-[440px] flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-2xl"
+        className="flex h-[88dvh] max-h-[720px] w-full min-w-0 max-w-[440px] flex-col overflow-hidden rounded-xl border border-gray-700 bg-gray-900 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"

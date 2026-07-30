@@ -3,9 +3,11 @@ import {
   JWLA_REFERENCE,
   RISK_AREA_SECTIONS,
   applyItemVisibility,
+  applySectionAppearance,
   getCalendarStatus,
   getLayerDefaults,
   isItemVisible,
+  resetSectionAppearance,
 } from "./riskAreaCatalog.js";
 
 function mergeItemSetting(settings, areaItem, patch) {
@@ -55,13 +57,13 @@ export default function AreaPanel({
   const update = (next) => onUpdate?.(next);
 
   return (
-    <div className="h-full min-h-0 flex flex-col bg-gray-900" data-testid="risk-area-panel">
+    <div className="h-full min-h-0 min-w-0 overflow-hidden flex flex-col bg-gray-900" data-testid="risk-area-panel">
       <div className={`border-b border-gray-700 ${compact ? "px-3 py-2" : "px-4 py-3"}`}>
         <div className="flex items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
               <h2 className="text-sm font-semibold text-white">JWLA Version Comparison</h2>
-              <span className="rounded bg-sky-950 px-1.5 py-0.5 text-[9px] font-bold text-sky-300 border border-sky-800">
+              <span className="rounded bg-red-950 px-1.5 py-0.5 text-[9px] font-bold text-red-300 border border-red-800">
                 {JWLA_REFERENCE.previousCircular} 기준
               </span>
               <span className="rounded bg-yellow-950 px-1.5 py-0.5 text-[9px] font-bold text-yellow-300 border border-yellow-800">
@@ -81,17 +83,28 @@ export default function AreaPanel({
             LMA PDF
           </a>
         </div>
-        <div className="mt-2 rounded-md border border-amber-800/70 bg-amber-950/35 px-2 py-1.5 text-[10px] leading-4 text-amber-200">
-          파란색은 033 기준/현재 backend 경보경계, 노란색은 034에서 추가된 북쪽 확장분입니다. 지도 표시는 계약 적용이나 자동 담보판정을 변경하지 않습니다.
-        </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+      <div
+        className="flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain px-2 py-2"
+        data-testid="risk-settings-scroll"
+      >
         {RISK_AREA_SECTIONS.map((section) => {
           const open = openSections.has(section.id);
           const readyItems = section.items.filter((areaItem) => areaItem.dataStatus === "ready" && areaItem.layerKeys.length > 0);
           const allVisible = readyItems.length > 0 && readyItems.every((areaItem) => isItemVisible(zoneSettings, areaItem));
           const visibleCount = readyItems.filter((areaItem) => isItemVisible(zoneSettings, areaItem)).length;
+          const sectionLayerSettings = readyItems.flatMap((areaItem) => areaItem.layerKeys.map((layerKey) => ({
+            ...getLayerDefaults(layerKey),
+            ...zoneSettings[layerKey],
+          })));
+          const sectionColors = new Set(sectionLayerSettings.map((setting) => setting.color));
+          const sectionOpacities = new Set(sectionLayerSettings.map((setting) => setting.opacity));
+          const groupColor = sectionColors.size === 1 ? sectionLayerSettings[0]?.color : section.color;
+          const groupOpacity = sectionOpacities.size === 1
+            ? sectionLayerSettings[0]?.opacity
+            : readyItems[0]?.opacity;
+          const hasMixedAppearance = sectionColors.size > 1 || sectionOpacities.size > 1;
 
           return (
             <section key={section.id} className="mb-2 overflow-hidden rounded-lg border border-gray-700/80 bg-gray-900/70">
@@ -128,6 +141,47 @@ export default function AreaPanel({
               {open && (
                 <div className="border-t border-gray-800">
                   <p className="px-3 py-2 text-[9px] leading-4 text-gray-500">{section.description}</p>
+                  {showAppearance && readyItems.length > 0 && (
+                    <div
+                      className="mx-1.5 mb-2 flex min-w-0 flex-wrap items-center gap-2 rounded-md border border-gray-700 bg-gray-950/70 px-2 py-2"
+                      data-testid={`section-appearance-${section.id}`}
+                    >
+                      <span className="shrink-0 text-[9px] font-semibold text-gray-300">그룹 전체</span>
+                      <input
+                        type="color"
+                        value={groupColor || section.color}
+                        onChange={(event) => update(applySectionAppearance(zoneSettings, section, { color: event.target.value }))}
+                        className="h-6 w-8 shrink-0 cursor-pointer rounded border-0 bg-transparent p-0"
+                        aria-label={`${section.label} 그룹 색상`}
+                        title="그룹 전체 색상"
+                      />
+                      <span className="shrink-0 text-[9px] text-gray-500">투명도</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="40"
+                        step="2"
+                        value={Math.round((groupOpacity || 0) * 100)}
+                        onChange={(event) => update(applySectionAppearance(zoneSettings, section, { opacity: Number(event.target.value) / 100 }))}
+                        className="h-1 min-w-[96px] flex-1 cursor-pointer accent-gray-400"
+                        aria-label={`${section.label} 그룹 투명도`}
+                      />
+                      <span className="w-8 shrink-0 text-right text-[9px] text-gray-500">
+                        {Math.round((groupOpacity || 0) * 100)}%
+                      </span>
+                      {hasMixedAppearance && (
+                        <span className="text-[8px] text-amber-400">혼합 설정 · 변경 시 전체 적용</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => update(resetSectionAppearance(zoneSettings, section))}
+                        className="ml-auto shrink-0 rounded border border-gray-600 px-2 py-1 text-[8px] text-gray-300 hover:border-gray-500 hover:bg-gray-800"
+                        aria-label={`${section.label} 그룹 기본값 적용`}
+                      >
+                        기본값 적용
+                      </button>
+                    </div>
+                  )}
                   <div className="space-y-0.5 px-1.5 pb-2">
                     {section.items.map((areaItem) => {
                       const ready = areaItem.dataStatus === "ready" && areaItem.layerKeys.length > 0;
@@ -195,13 +249,14 @@ export default function AreaPanel({
                           )}
 
                           {showAppearance && ready && setting && (
-                            <div className="mt-1.5 flex items-center gap-2 pl-8 sm:pl-6">
+                            <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2 pl-8 sm:pl-6">
                               <input
                                 type="color"
                                 value={setting.color}
                                 onChange={(event) => update(mergeItemSetting(zoneSettings, areaItem, { color: event.target.value }))}
                                 className="h-5 w-6 cursor-pointer rounded border-0 bg-transparent p-0"
                                 title="색상"
+                                aria-label={`${areaItem.label} 색상`}
                               />
                               <span className="text-[9px] text-gray-500">투명도</span>
                               <input
@@ -211,7 +266,8 @@ export default function AreaPanel({
                                 step="2"
                                 value={Math.round(setting.opacity * 100)}
                                 onChange={(event) => update(mergeItemSetting(zoneSettings, areaItem, { opacity: Number(event.target.value) / 100 }))}
-                                className="h-1 flex-1 cursor-pointer accent-gray-400"
+                                className="h-1 min-w-[96px] flex-1 cursor-pointer accent-gray-400"
+                                aria-label={`${areaItem.label} 투명도`}
                               />
                               <span className="w-7 text-right text-[9px] text-gray-500">{Math.round(setting.opacity * 100)}%</span>
                             </div>
