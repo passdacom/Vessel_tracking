@@ -21,21 +21,30 @@ function featureByName(collection, name) {
   return collection.features.find((feature) => feature.properties?.name === name);
 }
 
-test("JWLA-034 catalog reflects the official LMA structure and changes", () => {
+test("catalog presents JWLA-033 as the visible baseline and JWLA-034 as a distinct amendment", () => {
   assert.equal(JWLA_REFERENCE.circular, "JWLA-034");
+  assert.equal(JWLA_REFERENCE.previousCircular, "JWLA-033");
   assert.equal(JWLA_REFERENCE.publishedAt, "2026-07-29");
   assert.match(JWLA_REFERENCE.sourceUrl, /lmalloyds\.com\/.*JWLA-034/);
   assert.equal(JWLA_REFERENCE.sourceSha256, "125e507bbd187051315bdf80ae30583bc92ec9ad2d280d02fac2d10a019d03b9");
 
-  assert.equal(bySection("jwc-defined-waters").items.length, 4);
+  const amendment = bySection("jwc-034-amendment");
+  const baseline = bySection("contract-alerts");
+  assert.equal(amendment.items.length, 1);
+  assert.equal(amendment.items[0].layerKeys[0], "JWLA 034 Amendment - Red Sea 18N to 25.5N");
+  assert.equal(amendment.items[0].defaultVisible, true);
+  assert.equal(baseline.items.length, 22);
+  assert.equal(baseline.defaultOpen, false);
+  assert.ok(baseline.items.every((areaItem) => areaItem.defaultVisible === true));
+  assert.match(baseline.label, /JWLA-033 Baseline/);
+
   assert.equal(bySection("jwc-installations").items.length, 2);
   assert.equal(bySection("jwc-countries").items.length, 23);
-  assert.equal(bySection("contract-alerts").items.length, 22);
   assert.equal(bySection("ibf-itf").items.length, 11);
   assert.equal(bySection("ibf-itf").countLabel, "10 active · 1 withdrawn");
   assert.equal(bySection("iwl").items.length, 13);
 
-  const labels = allRiskAreaItems().map((item) => item.label);
+  const labels = allRiskAreaItems().map((areaItem) => areaItem.label);
   assert.ok(labels.includes("Saudi Arabia"));
   assert.ok(labels.includes("Eritrea"));
   assert.ok(!labels.includes("Pakistan"));
@@ -71,7 +80,7 @@ test("catalog identifiers and layer keys are unique", () => {
 });
 
 test("only mapped layers can be toggled and compound items update every layer key", () => {
-  const defined = bySection("jwc-defined-waters").items[0];
+  const defined = bySection("jwc-034-amendment").items[0];
   assert.ok(defined.layerKeys.length > 0);
   const on = applyItemVisibility({}, defined, true);
   assert.equal(isItemVisible(on, defined), true);
@@ -104,39 +113,59 @@ test("legacy contract-alert catalog stays aligned with the backend geofence inpu
   )));
   const catalogNames = new Set(bySection("contract-alerts").items.flatMap((item) => item.layerKeys));
   assert.deepEqual(catalogNames, expectedNames);
-  assert.equal(shouldLoadSectionLayers("contract-alerts", {}, null), false);
+  assert.equal(shouldLoadSectionLayers("contract-alerts", {}, null), true);
   assert.equal(shouldLoadSectionLayers("contract-alerts", {}, [...catalogNames][0]), true);
+
+  const israel = bySection("contract-alerts").items.find((areaItem) => (
+    areaItem.layerKeys.includes("Israel 12NM Territorial Waters")
+  ));
+  assert.ok(israel);
+  assert.equal(isItemVisible({}, israel), true);
+  assert.equal(isItemVisible({
+    "Israel 12NM Territorial Waters": { visible: false },
+  }, israel), false);
 });
 
-test("JWLA-034 reference GeoJSON matches the catalog and is geometrically valid", () => {
+test("JWLA-034 source GeoJSON remains valid and the UI amendment asset contains only the northward delta", () => {
   const areas = readGeoJSON("jwla-034-reference.geojson");
   const countries = readGeoJSON("jwla-034-countries.geojson");
+  const amendments = readGeoJSON("jwla-034-amendments.geojson");
   assert.equal(areas.features.length, 6);
   assert.equal(countries.features.length, 23);
+  assert.equal(amendments.features.length, 1);
 
-  const mappedKeys = new Set(
-    RISK_AREA_SECTIONS
-      .filter((section) => section.id.startsWith("jwc-"))
-      .flatMap((section) => section.items)
-      .flatMap((item) => item.layerKeys || []),
-  );
-  const featureNames = new Set([...areas.features, ...countries.features].map((f) => f.properties?.name));
-  assert.deepEqual(featureNames, mappedKeys);
+  const amendmentSectionKeys = new Set(bySection("jwc-034-amendment").items.flatMap((areaItem) => areaItem.layerKeys));
+  const amendmentFeatureNames = new Set(amendments.features.map((feature) => feature.properties?.name));
+  assert.deepEqual(amendmentFeatureNames, amendmentSectionKeys);
 
-  const allFeatures = [...areas.features, ...countries.features];
+  const allFeatures = [...areas.features, ...countries.features, ...amendments.features];
   assert.equal(new Set(allFeatures.map((feature) => feature.id)).size, allFeatures.length);
   for (const feature of allFeatures) {
     assert.ok(feature.id);
     assert.ok(["Polygon", "MultiPolygon"].includes(feature.geometry?.type));
-    assert.equal(feature.properties?.mapKind, "current-reference");
     assert.equal(feature.properties?.contractAlertEligible, false);
     assert.equal(feature.properties?.circular, "JWLA-034");
     assert.equal(feature.properties?.sourceSha256, "125e507bbd187051315bdf80ae30583bc92ec9ad2d280d02fac2d10a019d03b9");
     assert.ok(feature.properties?.sourceUrl);
   }
+
+  const delta = featureByName(amendments, "JWLA 034 Amendment - Red Sea 18N to 25.5N");
+  assert.ok(delta);
+  assert.equal(delta.properties?.mapKind, "version-amendment");
+  assert.equal(delta.properties?.previousCircular, "JWLA-033");
+  assert.equal(delta.properties?.changeType, "northward-extension");
+  assert.equal(delta.properties?.southLimit, 18);
+  assert.equal(delta.properties?.northLimit, 25.5);
+  assert.equal(delta.properties?.excludesEgyptTerritorialWaters, true);
+  const deltaBounds = turf.bbox(delta);
+  assert.ok(deltaBounds[1] >= 18, `delta extends south of 18N: ${deltaBounds[1]}`);
+  assert.equal(deltaBounds[3], 25.5);
+  assert.equal(turf.booleanPointInPolygon(turf.point([37.0, 24.5]), delta), true);
+  assert.equal(turf.booleanPointInPolygon(turf.point([35.25, 24.5]), delta), false);
+  assert.equal(turf.booleanPointInPolygon(turf.point([40.0, 17.0]), delta), false);
 });
 
-test("the amended combined waters record 25.5N, exclude Egypt coastal waters, and Cabo includes Tanzania", () => {
+test("the full JWLA-034 reference still records the amended limit and Cabo includes Tanzania", () => {
   const areas = readGeoJSON("jwla-034-reference.geojson");
   const main = featureByName(areas, "JWLA 034 - Combined Middle East and Southern Red Sea Waters");
   const cabo = featureByName(areas, "JWLA 034 - Cabo Delgado");

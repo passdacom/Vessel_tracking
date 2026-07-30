@@ -86,7 +86,7 @@ export default function SharedView({ token }) {
           subdomains="abcd"
           maxZoom={tileConfig.maxZoom}
         />
-        <RestrictedZone visible={showZone} />
+        {showZone && <RestrictedZone />}
         {renderableVessels.map(({ vessel, position, positions: vesselPositions }) => (
           <React.Fragment key={vessel.id}>
             <VesselMarker
