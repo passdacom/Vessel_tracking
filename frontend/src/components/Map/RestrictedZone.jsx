@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { GeoJSON, useMap } from "react-leaflet";
 import { getLayerDefaults, shouldLoadSectionLayers } from "../../riskAreas/riskAreaCatalog.js";
 
-const AREA_URL = "/risk-areas/jwla-034-reference.geojson";
+const AREA_URL = "/risk-areas/jwla-034-amendments.geojson";
 const COUNTRY_URL = "/risk-areas/jwla-034-countries.geojson";
 const CONTRACT_ALERT_URLS = [
   "/war-risk-zone.geojson",
@@ -42,7 +42,7 @@ function featureByName(collections, name) {
 }
 
 /**
- * JWLA-034 current-reference overlay.
+ * JWLA-033 baseline with a separate JWLA-034 amendment overlay.
  *
  * These layers intentionally do not feed the backend geofence checker. The current
  * reference map and contract alert rules have different version/effective-date semantics.
@@ -64,7 +64,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         setAreas(await response.json());
       } catch (error) {
-        if (error.name !== "AbortError") console.error("JWLA-034 area reference load error:", error);
+        if (error.name !== "AbortError") console.error("JWLA-034 amendment load error:", error);
       }
     };
     loadAreas();
@@ -185,7 +185,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
       {areas && (
         <GeoJSON
           ref={areaRef}
-          key={`jwla034-areas-${areas.features?.length || 0}`}
+          key={`jwla034-amendments-${areas.features?.length || 0}`}
           data={areas}
           style={getStyle}
           onEachFeature={onEachFeature}

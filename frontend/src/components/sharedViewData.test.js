@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 import { getNextSharedMapMode, getRenderableVessels, getSharedMapTileConfig } from "./sharedViewData.js";
 
@@ -28,4 +29,10 @@ test("shared map tile config switches between day and night basemaps", () => {
   assert.equal(getSharedMapTileConfig("unknown").mode, "day");
   assert.equal(getNextSharedMapMode("day"), "night");
   assert.equal(getNextSharedMapMode("night"), "day");
+});
+
+test("shared view Zone OFF unmounts RestrictedZone instead of passing an ignored prop", () => {
+  const source = fs.readFileSync(new URL("./SharedView.jsx", import.meta.url), "utf8");
+  assert.match(source, /\{showZone\s*&&\s*<RestrictedZone\s*\/>\}/);
+  assert.doesNotMatch(source, /<RestrictedZone\s+visible=/);
 });

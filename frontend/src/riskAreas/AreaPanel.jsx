@@ -59,14 +59,17 @@ export default function AreaPanel({
       <div className={`border-b border-gray-700 ${compact ? "px-3 py-2" : "px-4 py-3"}`}>
         <div className="flex items-start justify-between gap-2">
           <div>
-            <div className="flex items-center gap-1.5">
-              <h2 className="text-sm font-semibold text-white">Current Risk Area Reference</h2>
-              <span className="rounded bg-red-950 px-1.5 py-0.5 text-[9px] font-bold text-red-300 border border-red-800">
-                {JWLA_REFERENCE.circular}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <h2 className="text-sm font-semibold text-white">JWLA Version Comparison</h2>
+              <span className="rounded bg-sky-950 px-1.5 py-0.5 text-[9px] font-bold text-sky-300 border border-sky-800">
+                {JWLA_REFERENCE.previousCircular} 기준
+              </span>
+              <span className="rounded bg-yellow-950 px-1.5 py-0.5 text-[9px] font-bold text-yellow-300 border border-yellow-800">
+                {JWLA_REFERENCE.circular} 추가
               </span>
             </div>
             <p className="mt-1 text-[10px] leading-4 text-gray-400">
-              Published {JWLA_REFERENCE.publishedAt}. Latest-reference visualization; contract application and alerts may differ.
+              {JWLA_REFERENCE.previousCircular} 기존 구역 위에 {JWLA_REFERENCE.circular}의 북쪽 확장분만 별도 색상으로 표시합니다. Published {JWLA_REFERENCE.publishedAt}.
             </p>
           </div>
           <a
@@ -79,7 +82,7 @@ export default function AreaPanel({
           </a>
         </div>
         <div className="mt-2 rounded-md border border-amber-800/70 bg-amber-950/35 px-2 py-1.5 text-[10px] leading-4 text-amber-200">
-          참고지도와 계약 경보는 분리됩니다. JWC·IBF/ITF·IWL은 서로 다른 기준이며 자동 담보판정에 사용하지 않습니다.
+          파란색은 033 기준/현재 backend 경보경계, 노란색은 034에서 추가된 북쪽 확장분입니다. 지도 표시는 계약 적용이나 자동 담보판정을 변경하지 않습니다.
         </div>
       </div>
 

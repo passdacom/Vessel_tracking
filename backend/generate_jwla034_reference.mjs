@@ -83,12 +83,7 @@ function withMetadata(feature, name, extra = {}) {
   };
 }
 
-function buildCombinedWaters(countries) {
-  const legacy = readJson("frontend/public/war-risk-zone.geojson");
-  const oldRedSeaName = "JWC War Risk Zone - Red Sea (S of 18N)";
-  const retained = legacy.features.filter((feature) => feature.properties?.name !== oldRedSeaName);
-  if (retained.length !== 5) throw new Error(`Expected five retained main-water features, got ${retained.length}`);
-
+function buildAmendedRedSea(countries) {
   const redSea = firstFeature("backend/iho_red_sea.geojson");
   const southOf255 = turf.bboxPolygon([30, -5, 50, 25.5]);
   const redSeaSouthOf255 = intersect(redSea, southOf255, "Red Sea south of 25.5N");
@@ -99,8 +94,16 @@ function buildCombinedWaters(countries) {
   const egypt = countryFeature(countries, "Egypt");
   const egyptBuffer = turf.buffer(egypt, TERRITORIAL_SEA_KM, { units: "kilometers", steps: 32 });
   const egyptTerritorialInRedSea = intersect(egyptBuffer, redSeaSouthOf255, "Egypt territorial reference in Red Sea");
-  const amendedRedSea = difference(redSeaSouthOf255, egyptTerritorialInRedSea, "Red Sea excluding Egypt reference waters");
+  return difference(redSeaSouthOf255, egyptTerritorialInRedSea, "Red Sea excluding Egypt reference waters");
+}
 
+function buildCombinedWaters(countries) {
+  const legacy = readJson("frontend/public/war-risk-zone.geojson");
+  const oldRedSeaName = "JWC War Risk Zone - Red Sea (S of 18N)";
+  const retained = legacy.features.filter((feature) => feature.properties?.name !== oldRedSeaName);
+  if (retained.length !== 5) throw new Error(`Expected five retained main-water features, got ${retained.length}`);
+
+  const amendedRedSea = buildAmendedRedSea(countries);
   const combined = union([...retained, amendedRedSea], "JWLA-034 combined waters");
   return withMetadata(combined, "JWLA 034 - Combined Middle East and Southern Red Sea Waters", {
     stableId: "jwla-034:defined-waters:combined-middle-east-southern-red-sea",
@@ -110,6 +113,30 @@ function buildCombinedWaters(countries) {
     excludesEgyptTerritorialWaters: true,
     geometryStatus: "approximate-reference",
   });
+}
+
+function buildAmendments(countries) {
+  const northwardExtensionBand = turf.bboxPolygon([30, 18, 50, 25.5]);
+  const northwardExtension = intersect(
+    buildAmendedRedSea(countries),
+    northwardExtensionBand,
+    "JWLA-034 Red Sea northward extension",
+  );
+
+  return turf.featureCollection([
+    withMetadata(northwardExtension, "JWLA 034 Amendment - Red Sea 18N to 25.5N", {
+      stableId: "jwla-034:amendment:red-sea-18n-to-25-5n",
+      mapKind: "version-amendment",
+      previousCircular: "JWLA-033",
+      changeType: "northward-extension",
+      scope: "defined-waters-amendment",
+      officialCategory: "Defined Waters amendment",
+      southLimit: 18,
+      northLimit: 25.5,
+      excludesEgyptTerritorialWaters: true,
+      geometryStatus: "approximate-reference",
+    }),
+  ]);
 }
 
 function buildCaboDelgado(countries) {
@@ -213,19 +240,24 @@ function assertValid(collection, label) {
 function main() {
   const countries = readJson("backend/countries.geojson");
   const areas = buildAreas(countries);
+  const amendments = buildAmendments(countries);
   const listedCountries = buildCountries(countries);
   assertValid(areas, "areas");
+  assertValid(amendments, "amendments");
   assertValid(listedCountries, "countries");
 
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "jwla-034-reference.geojson"), JSON.stringify(areas));
+  fs.writeFileSync(path.join(outDir, "jwla-034-amendments.geojson"), JSON.stringify(amendments));
   fs.writeFileSync(path.join(outDir, "jwla-034-countries.geojson"), JSON.stringify(listedCountries));
   console.log(JSON.stringify({
     circular: CIRCULAR,
     areas: areas.features.length,
+    amendments: amendments.features.length,
     countries: listedCountries.features.length,
     files: [
       path.join(outDir, "jwla-034-reference.geojson"),
+      path.join(outDir, "jwla-034-amendments.geojson"),
       path.join(outDir, "jwla-034-countries.geojson"),
     ],
   }, null, 2));
