@@ -4,12 +4,14 @@ import "leaflet/dist/leaflet.css";
 import VesselMarker from "./Map/VesselMarker.jsx";
 import VesselTrack from "./Map/VesselTrack.jsx";
 import RestrictedZone from "./Map/RestrictedZone.jsx";
+import { getNextSharedMapMode, getRenderableVessels, getSharedMapTileConfig } from "./sharedViewData.js";
 
 export default function SharedView({ token }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [showZone, setShowZone] = useState(true);
+  const [mapMode, setMapMode] = useState("day");
 
   useEffect(() => {
     fetch(`/api/shares/view/${token}?hours=72`)
@@ -35,9 +37,12 @@ export default function SharedView({ token }) {
     </div>
   );
 
-  // positions map
+  // positions map + marker-safe vessel list
   const positions = {};
-  data.vessels.forEach(v => { positions[v.id] = v.positions; });
+  data.vessels.forEach(v => { positions[v.id] = v.positions || []; });
+  const renderableVessels = getRenderableVessels(data.vessels);
+  const tileConfig = getSharedMapTileConfig(mapMode);
+  const nextMapMode = getNextSharedMapMode(mapMode);
 
   return (
     <div style={{ width:"100vw", height:"100vh", position:"relative" }}>
@@ -56,6 +61,12 @@ export default function SharedView({ token }) {
           </div>
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <button onClick={() => setMapMode(nextMapMode)} style={{
+            padding:"4px 10px", borderRadius:6, border:"1px solid #475569", cursor:"pointer", fontSize:11, fontWeight:600,
+            background: mapMode === "day" ? "#f8fafc" : "#1e293b", color: mapMode === "day" ? "#0f172a" : "#e2e8f0"
+          }}>
+            {tileConfig.label}
+          </button>
           <button onClick={() => setShowZone(v => !v)} style={{
             padding:"4px 10px", borderRadius:6, border:"none", cursor:"pointer", fontSize:11, fontWeight:600,
             background: showZone ? "#7f1d1d" : "#334155", color: showZone ? "#fca5a5" : "#94a3b8"
@@ -69,21 +80,24 @@ export default function SharedView({ token }) {
       {/* 지도 */}
       <MapContainer center={[25.5, 54]} zoom={6} style={{ width:"100%", height:"100%" }} zoomControl={true}>
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution="&copy; OpenStreetMap &copy; CartoDB"
-          maxZoom={18}
+          key={tileConfig.mode}
+          url={tileConfig.url}
+          attribution={tileConfig.attribution}
+          subdomains="abcd"
+          maxZoom={tileConfig.maxZoom}
         />
         <RestrictedZone visible={showZone} />
-        {data.vessels.map(vessel => (
+        {renderableVessels.map(({ vessel, position, positions: vesselPositions }) => (
           <React.Fragment key={vessel.id}>
             <VesselMarker
               vessel={vessel}
-              position={positions[vessel.id]?.[0]}
+              position={position}
               isSelected={selectedId === vessel.id}
-              onSelect={() => setSelectedId(id => id === vessel.id ? null : vessel.id)}
+              onClick={() => setSelectedId(id => id === vessel.id ? null : vessel.id)}
+              trackHours={72}
             />
-            {selectedId === vessel.id && positions[vessel.id]?.length > 1 && (
-              <VesselTrack positions={positions[vessel.id]} color={vessel.color} />
+            {selectedId === vessel.id && vesselPositions.length > 1 && (
+              <VesselTrack positions={vesselPositions} color={vessel.color} />
             )}
           </React.Fragment>
         ))}

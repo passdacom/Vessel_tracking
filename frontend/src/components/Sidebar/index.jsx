@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import VesselCard from "./VesselCard.jsx";
 import ApiUpdateModal from "../ApiUpdateModal.jsx";
 import ArchivedVesselsModal from "../ArchivedVesselsModal.jsx";
 import PortList from "./PortList.jsx";
+import AreaPanel from "../../riskAreas/AreaPanel.jsx";
 
 // 빠른 선택 버튼 (자주 사용)
 const TRACK_QUICK = [
@@ -24,6 +25,8 @@ const TRACK_ALL = [
     { label: "7일", value: 168 },
     { label: "14일", value: 336 },
     { label: "30일", value: 720 },
+    { label: "60일", value: 1440 },
+    { label: "90일", value: 2160 },
 ];
 
 /* ── 데스크탑: 기존 사이드바 ── */
@@ -32,12 +35,41 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
     onSelectVessel, selectedVesselId, wsConnected,
     onShowShare, onLogout, onOpenSettings, onOpenGuide, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
+    showLabels = true, onToggleLabels,
     customGroups = [],
     apiFetch, selectedPort, onSelectPort, onStartPlayback, onHistoryFetched, onOpenZoneSettings,
+    zoneSettings = {}, onZoneSettingsUpdate, onFocusArea,
+    onStartEta,
     sidebarWidth = 288 }) {
 
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
     const [showArchiveModal, setShowArchiveModal] = useState(false);
+    const [activeSidebarTab, setActiveSidebarTab] = useState("vessels");
+
+    // 지도에서 선박 클릭 시: 해당 선박이 속한 그룹을 펼치고 카드를 화면에 보이게 스크롤
+    useEffect(() => {
+        if (!selectedVesselId) return;
+
+        // 선박이 속한 그룹 찾기 → 접혀 있으면 펼침
+        const vessel = vessels.find(v => v.id === selectedVesselId);
+        if (vessel) {
+            const groupName = vessel.companyType || "자사간사";
+            setCollapsedGroups(prev => {
+                if (!prev.has(groupName)) return prev; // 이미 펼쳐져 있으면 변경 없음
+                const next = new Set(prev);
+                next.delete(groupName);
+                return next;
+            });
+        }
+
+        // 그룹 펼침 re-render 후 스크롤 실행
+        const timer = setTimeout(() => {
+            const el = document.getElementById(`vessel-card-${selectedVesselId}`);
+            el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }, 60);
+
+        return () => clearTimeout(timer);
+    }, [selectedVesselId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const toggleCollapse = (groupName, e) => {
         // Prevent toggle when clicking the "Hide/Show Group" button inside the header
@@ -86,6 +118,9 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
         });
     };
 
+    // VesselCard 드롭다운용 전체 그룹 목록 (기본값 제외, 동적 포함)
+    const allCustomGroups = Array.from(allGroupNames).filter(g => g !== '자사간사' && g !== '타사간사');
+
     const renderVesselList = (list) => list.map((vessel) => (
         <VesselCard key={vessel.id} vessel={vessel}
             latestPosition={positions[vessel.id]?.[0]}
@@ -96,10 +131,11 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
             isVisible={!hiddenVessels.has(vessel.id)}
             onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)}
-            customGroups={customGroups}
+            customGroups={allCustomGroups}
             apiFetch={apiFetch}
             onStartPlayback={onStartPlayback}
-            onHistoryFetched={onHistoryFetched} />
+            onHistoryFetched={onHistoryFetched}
+            onStartEta={onStartEta} />
     ));
 
     return (
@@ -130,6 +166,25 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                 </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-1 border-b border-gray-700 bg-gray-950/40 px-3 py-2">
+                <button
+                    type="button"
+                    onClick={() => setActiveSidebarTab("vessels")}
+                    className={`rounded-md py-1.5 text-xs font-semibold transition ${activeSidebarTab === "vessels" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+                >
+                    🚢 선박
+                </button>
+                <button
+                    type="button"
+                    onClick={() => setActiveSidebarTab("areas")}
+                    className={`rounded-md py-1.5 text-xs font-semibold transition ${activeSidebarTab === "areas" ? "bg-red-700 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+                >
+                    ◫ 지역
+                </button>
+            </div>
+
+            {activeSidebarTab === "vessels" ? (
+                <>
             <div className="px-3 py-2.5 border-b border-gray-700">
                 <div className="flex items-center gap-1.5">
                     {TRACK_QUICK.map((opt) => (
@@ -173,7 +228,22 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                         </svg>
                         {activeVessels.every(v => hiddenVessels.has(v.id)) ? "전체 표시" : "전체 숨기기"}
                     </button>
-                    <span className="text-gray-600 text-xs">
+                    {/* 라벨 숨기기/표시 토글 */}
+                    <button
+                        onClick={onToggleLabels}
+                        className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all border ${showLabels
+                            ? "bg-blue-700 hover:bg-blue-600 text-white border-blue-500"
+                            : "bg-gray-800 hover:bg-gray-700 text-gray-400 border-gray-600 border-dashed"
+                            }`}
+                        title={showLabels ? "선박명 라벨 숨기기" : "선박명 라벨 표시"}
+                    >
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                        </svg>
+                        라벨
+                    </button>
+
+                    <span className="text-gray-600 text-xs ml-auto">
                         {activeVessels.filter(v => !hiddenVessels.has(v.id)).length}/{activeVessels.length} 표시중
                     </span>
                 </div>
@@ -265,34 +335,49 @@ function DesktopSidebar({ vessels, positions, trackHours, onTrackHoursChange,
                 />
             )}
 
-            <div className="px-3 py-2.5 border-t border-gray-700">
-                <button
-                    onClick={onOpenZoneSettings}
-                    className="w-full py-2 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 bg-red-900 hover:bg-red-800 text-red-200 border border-red-700"
-                >
-                    <span style={{ fontSize: 13 }}>🔴</span>
-                    War Risk Zone 설정
-                </button>
-            </div>
-            <div className="px-3 py-3 border-t border-gray-700">
-                <button onClick={onOpenGuide} className="w-full py-2 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-200 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5">
-                    📖 사용자 매뉴얼
-                </button>
-                <div className="flex gap-1 mt-2">
-                    <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} className="flex-1 py-1.5 bg-green-900 hover:bg-green-800 border border-green-700 text-green-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
-                        🔄 API 강제 수신
-                    </button>
-                    <button onClick={onShowShare} className="flex-1 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
-                        🔗 공유 링크
-                    </button>
-                    <button onClick={() => window.print()} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="Export / Print Report">
-                        🖨️
-                    </button>
-                    <button onClick={onOpenSettings} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="설정">
-                        ⚙️
-                    </button>
+                </>
+            ) : (
+                <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="min-h-0 flex-1">
+                        <AreaPanel
+                            zoneSettings={zoneSettings}
+                            onUpdate={onZoneSettingsUpdate}
+                            onFocusArea={onFocusArea}
+                            compact
+                        />
+                    </div>
+                    <div className="border-t border-gray-700 px-3 py-2">
+                        <button
+                            type="button"
+                            onClick={onOpenZoneSettings}
+                            className="w-full rounded-lg border border-gray-600 bg-gray-800 py-1.5 text-[10px] font-semibold text-gray-300 transition hover:bg-gray-700"
+                        >
+                            색상·투명도 상세 설정
+                        </button>
+                    </div>
                 </div>
-            </div>
+            )}
+            {activeSidebarTab === "vessels" && (
+                <div className="px-3 py-3 border-t border-gray-700">
+                    <button onClick={onOpenGuide} className="w-full py-2 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-200 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5">
+                        📖 사용자 매뉴얼
+                    </button>
+                    <div className="flex gap-1 mt-2">
+                        <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} className="flex-1 py-1.5 bg-green-900 hover:bg-green-800 border border-green-700 text-green-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
+                            🔄 API 강제 수신
+                        </button>
+                        <button onClick={onShowShare} className="flex-1 py-1.5 bg-blue-900 hover:bg-blue-800 border border-blue-700 text-blue-300 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1">
+                            🔗 공유 링크
+                        </button>
+                        <button onClick={() => window.print()} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="Export / Print Report">
+                            🖨️
+                        </button>
+                        <button onClick={onOpenSettings} className="py-1.5 px-2 bg-gray-700 hover:bg-gray-600 text-gray-400 text-xs rounded-lg transition" title="설정">
+                            ⚙️
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -302,12 +387,15 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
     onAddVessel, onManualEntry, onDeleteVessel, onUpdateVessel, onArchiveVessel, onRestoreVessel,
     onSelectVessel, selectedVesselId, wsConnected, onManageGroups,
     hiddenVessels = new Set(), onToggleVessel, onToggleAllVessels,
+    showLabels = true, onToggleLabels,
     customGroups = [],
-    apiFetch, onStartPlayback, onHistoryFetched, onOpenZoneSettings }) {
+    apiFetch, onStartPlayback, onHistoryFetched, onOpenZoneSettings, onStartEta,
+    zoneSettings = {}, onZoneSettingsUpdate, onFocusArea }) {
 
     const [open, setOpen] = useState(false);
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
     const [showArchiveModal, setShowArchiveModal] = useState(false);
+    const [activeMobileTab, setActiveMobileTab] = useState("vessels");
 
     const toggleCollapse = (groupName, e) => {
         if (e && e.target.closest('button')) return;
@@ -345,6 +433,8 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
         };
     });
 
+    const allCustomGroups = Array.from(allGroupNames).filter(g => g !== '자사간사' && g !== '타사간사');
+
     const renderVesselList = (list) => list.map((vessel) => (
         <VesselCard key={vessel.id} vessel={vessel}
             latestPosition={positions[vessel.id]?.[0]}
@@ -355,10 +445,11 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
             onUpdate={(updates) => onUpdateVessel(vessel.id, updates)}
             isVisible={!hiddenVessels.has(vessel.id)}
             onToggleVisible={() => onToggleVessel && onToggleVessel(vessel.id)}
-            customGroups={customGroups}
+            customGroups={allCustomGroups}
             apiFetch={apiFetch}
             onStartPlayback={onStartPlayback}
-            onHistoryFetched={onHistoryFetched} />
+            onHistoryFetched={onHistoryFetched}
+            onStartEta={onStartEta} />
     ));
 
     return (
@@ -415,6 +506,24 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                 display: "flex",
                 flexDirection: "column"
             }}>
+                <div className="grid grid-cols-2 gap-1 border-b border-gray-700 px-3 py-2">
+                    <button
+                        type="button"
+                        onClick={() => setActiveMobileTab("vessels")}
+                        className={`rounded-md py-1.5 text-xs font-semibold ${activeMobileTab === "vessels" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400"}`}
+                    >
+                        🚢 선박
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveMobileTab("areas")}
+                        className={`rounded-md py-1.5 text-xs font-semibold ${activeMobileTab === "areas" ? "bg-red-700 text-white" : "bg-gray-800 text-gray-400"}`}
+                    >
+                        ◫ 지역
+                    </button>
+                </div>
+                {activeMobileTab === "vessels" ? (
+                    <>
                 <div style={{ padding: "12px 12px 6px", borderBottom: "1px solid #374151", flexShrink: 0 }}>
                     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                         {TRACK_QUICK.map((opt) => (
@@ -448,14 +557,23 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                 </div>
 
                 {activeVessels.length > 0 && (
-                    <div style={{ padding: "8px 12px", borderBottom: "1px solid #374151", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+                    <div style={{ padding: "8px 12px", borderBottom: "1px solid #374151", display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0, gap: 6 }}>
                         <button onClick={onToggleAllVessels} style={{
                             background: activeVessels.every(v => hiddenVessels.has(v.id)) ? "#374151" : "#2563eb",
                             color: "#fff", border: "none", borderRadius: 4, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer"
                         }}>
                             {activeVessels.every(v => hiddenVessels.has(v.id)) ? "전체 표시" : "전체 숨기기"}
                         </button>
-                        <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                        <button onClick={onToggleLabels} style={{
+                            background: showLabels ? "#1d4ed8" : "#374151",
+                            color: showLabels ? "#fff" : "#9ca3af",
+                            border: showLabels ? "1px solid #3b82f6" : "1px dashed #4b5563",
+                            borderRadius: 4, padding: "4px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                            display: "flex", alignItems: "center", gap: 4,
+                        }}>
+                            💬 라벨
+                        </button>
+                        <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>
                             {activeVessels.filter(v => !hiddenVessels.has(v.id)).length}/{activeVessels.length} 표시중
                         </span>
                     </div>
@@ -514,17 +632,38 @@ function MobileDrawer({ vessels, positions, trackHours, onTrackHoursChange,
                         </button>
                     </div>
                 )}
+                    </>
+                ) : (
+                    <div className="min-h-0 flex-1">
+                        <AreaPanel
+                            zoneSettings={zoneSettings}
+                            onUpdate={onZoneSettingsUpdate}
+                            onFocusArea={onFocusArea}
+                            compact
+                        />
+                    </div>
+                )}
                 <div style={{ padding: "8px 12px", borderTop: "1px solid #374151", flexShrink: 0, display: "flex", gap: "6px" }}>
-                    <button onClick={() => window.print()} style={{
-                        flex: 1, padding: "8px", background: "#374151",
-                        color: "#d1d5db", border: "none", borderRadius: 8,
-                        fontSize: 12, fontWeight: 600, cursor: "pointer"
-                    }}>🖨 Print</button>
-                    <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} style={{
-                        flex: 1, padding: "8px", background: "#065f46",
-                        color: "#6ee7b7", border: "1px solid #047857", borderRadius: 8,
-                        fontSize: 12, fontWeight: 600, cursor: "pointer"
-                    }}>🔄 강제 수신</button>
+                    {activeMobileTab === "areas" ? (
+                        <button onClick={onOpenZoneSettings} style={{
+                            flex: 1, padding: "8px", background: "#374151",
+                            color: "#d1d5db", border: "1px solid #4b5563", borderRadius: 8,
+                            fontSize: 12, fontWeight: 600, cursor: "pointer"
+                        }}>색상·투명도 상세 설정</button>
+                    ) : (
+                        <>
+                            <button onClick={() => window.print()} style={{
+                                flex: 1, padding: "8px", background: "#374151",
+                                color: "#d1d5db", border: "none", borderRadius: 8,
+                                fontSize: 12, fontWeight: 600, cursor: "pointer"
+                            }}>🖨 Print</button>
+                            <button onClick={() => window.dispatchEvent(new CustomEvent('open-api-modal'))} style={{
+                                flex: 1, padding: "8px", background: "#065f46",
+                                color: "#6ee7b7", border: "1px solid #047857", borderRadius: 8,
+                                fontSize: 12, fontWeight: 600, cursor: "pointer"
+                            }}>🔄 강제 수신</button>
+                        </>
+                    )}
                 </div>
             </div>
             {showArchiveModal && (

@@ -1,6 +1,9 @@
 import { Router } from "express";
 import { VESSEL_COLORS } from "../utils/colors.js";
 import { apiCall, checkSpoofing } from "../services/datalasticPoller.js";
+import { geofenceChecker } from "../services/geofenceChecker.js";
+import { logger } from "../utils/logger.js";
+import { authenticateCredentials } from "../accounts.js";
 
 /** parseInt 실패(NaN, 음수) 시 null 반환 */
 function parseId(idStr) {
@@ -31,6 +34,24 @@ async function logApiUsage(prisma, endpoint, credits, account) {
   } catch { /* non-critical */ }
 }
 
+function normalizeDatalasticResult(rawResult) {
+  if (rawResult && typeof rawResult.attempted === "boolean") {
+    const attempted = rawResult.attempted;
+    return {
+      attempted,
+      attempts: attempted ? Math.max(1, Number(rawResult.attempts) || 1) : 0,
+      response: attempted ? rawResult.response ?? null : null,
+      error: rawResult.error ?? null,
+    };
+  }
+  return {
+    attempted: rawResult != null,
+    attempts: rawResult == null ? 0 : 1,
+    response: rawResult ?? null,
+    error: rawResult == null ? "transport_unavailable" : null,
+  };
+}
+
 /** 현재 계정이 해당 선박에 접근 가능한지 확인 */
 async function checkVesselAccess(prisma, vesselId, req) {
   const vessel = await prisma.vessel.findUnique({ where: { id: vesselId } });
@@ -40,8 +61,41 @@ async function checkVesselAccess(prisma, vesselId, req) {
   return vessel;
 }
 
-export default function vesselRoutes(prisma) {
+/** 히스토리 API는 크레딧을 소모하므로 admin 세션 또는 admin 비밀번호가 필요 */
+async function requireHistoryPassword(prisma, req, res) {
+  if (req.accountRole === "admin") return true;
+
+  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  if (!password) {
+    res.status(401).json({ error: "히스토리 조회 비밀번호를 입력해주세요." });
+    return false;
+  }
+
+  const adminAccount = await authenticateCredentials(prisma, "admin", password);
+  if (!adminAccount || adminAccount.role !== "admin") {
+    res.status(401).json({ error: "히스토리 조회 비밀번호가 올바르지 않습니다." });
+    return false;
+  }
+
+  return true;
+}
+
+export default function vesselRoutes(prisma, { apiCallFn = apiCall } = {}) {
   const router = Router();
+
+  async function requestDatalastic(endpoint, params, account, { costPerAttempt = 1 } = {}) {
+    let rawResult;
+    try {
+      rawResult = await apiCallFn(endpoint, params);
+    } catch {
+      rawResult = { attempted: true, attempts: 1, response: null, error: "transport_error" };
+    }
+    const result = normalizeDatalasticResult(rawResult);
+    if (result.attempted) {
+      await logApiUsage(prisma, endpoint, result.attempts * costPerAttempt, account);
+    }
+    return result;
+  }
 
   // Search vessels via Datalastic API (by name or IMO)
   router.get("/search", async (req, res) => {
@@ -59,8 +113,9 @@ export default function vesselRoutes(prisma) {
 
       if (isIMO) {
         endpoint = "vessel_info";
-        result = await apiCall(endpoint, { imo: q });
-        await logApiUsage(prisma, endpoint, 1, req.account);
+        const transport = await requestDatalastic(endpoint, { imo: q }, req.account);
+        if (!transport.response) return res.status(502).json({ error: "Datalastic API unavailable" });
+        result = transport.response;
         if (result && result.data) {
           const d = result.data;
           return res.json([{
@@ -74,8 +129,9 @@ export default function vesselRoutes(prisma) {
 
       if (isMMSI) {
         endpoint = "vessel_info";
-        result = await apiCall(endpoint, { mmsi: q });
-        await logApiUsage(prisma, endpoint, 1, req.account);
+        const transport = await requestDatalastic(endpoint, { mmsi: q }, req.account);
+        if (!transport.response) return res.status(502).json({ error: "Datalastic API unavailable" });
+        result = transport.response;
         if (result && result.data) {
           const d = result.data;
           return res.json([{
@@ -88,8 +144,9 @@ export default function vesselRoutes(prisma) {
       }
 
       endpoint = "vessel_find";
-      result = await apiCall(endpoint, { name: q });
-      await logApiUsage(prisma, endpoint, 1, req.account);
+      const transport = await requestDatalastic(endpoint, { name: q }, req.account);
+      if (!transport.response) return res.status(502).json({ error: "Datalastic API unavailable" });
+      result = transport.response;
       if (!result || !result.data) return res.json([]);
 
       const vessels = (Array.isArray(result.data) ? result.data : [result.data])
@@ -102,7 +159,7 @@ export default function vesselRoutes(prisma) {
         }));
       res.json(vessels);
     } catch (e) {
-      console.error("Vessel search error:", e.message);
+      logger.error("[vessels] search error:", e.message);
       res.status(500).json({ error: "검색 중 오류가 발생했습니다" });
     }
   });
@@ -117,7 +174,7 @@ export default function vesselRoutes(prisma) {
         orderBy: { createdAt: "asc" },
       });
       res.json(vessels);
-    } catch (e) { res.status(500).json({ error: "Internal server error" }); }
+    } catch (e) { logger.error("[/api/vessels] findMany error:", e.message); res.status(500).json({ error: "Internal server error" }); }
   });
 
   // Get position history
@@ -129,7 +186,7 @@ export default function vesselRoutes(prisma) {
       const vessel = await checkVesselAccess(prisma, id, req);
       if (!vessel) return res.status(404).json({ error: "Vessel not found" });
 
-      const hours = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 720);
+      const hours = Math.min(Math.max(parseInt(req.query.hours) || 24, 1), 2160);
       const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
       let positions = await prisma.position.findMany({
@@ -144,6 +201,39 @@ export default function vesselRoutes(prisma) {
           orderBy: { timestamp: "desc" },
         });
         if (latest) positions = [latest];
+      }
+
+      // 최신 위치에 현재 HRA 구역 정보 + 가장 최근 ETA/목적지 주입
+      if (positions.length > 0) {
+        const currentZones = geofenceChecker.getCurrentZones(id);
+
+        // 1차: 현재 조회 범위(trackHours 이내) 에서 찾기
+        let latestEta = positions[0].eta ?? (positions.find(p => p.eta !== null)?.eta ?? null);
+        let latestDest = positions[0].destination ?? (positions.find(p => p.destination)?.destination ?? null);
+
+        // 2차: 범위 내에 없으면 전체 히스토리에서 가장 최근 비-null 값 조회
+        // (AIS Type 5 메시지는 Type 1/2/3 위치보고보다 훨씬 드물게 수신되므로
+        //  trackHours 범위를 벗어난 과거 데이터에만 존재할 수 있음)
+        if (latestEta == null || latestDest == null) {
+          const histPos = await prisma.position.findFirst({
+            where: {
+              vesselId: id,
+              suspicious: false,
+              OR: [
+                ...(latestEta == null  ? [{ eta:         { not: null } }] : []),
+                ...(latestDest == null ? [{ destination: { not: null } }] : []),
+              ],
+            },
+            orderBy: { timestamp: "desc" },
+            select: { eta: true, destination: true },
+          });
+          if (histPos) {
+            if (latestEta  == null) latestEta  = histPos.eta         ?? null;
+            if (latestDest == null) latestDest = histPos.destination  ?? null;
+          }
+        }
+
+        positions[0] = { ...positions[0], currentZones, eta: latestEta, destination: latestDest };
       }
 
       res.json(positions);
@@ -202,6 +292,18 @@ export default function vesselRoutes(prisma) {
       // admin이 추가할 때 account 지정 가능, 일반 계정은 자기 계정
       const account = (req.accountRole === "admin" && req.body.account) ? req.body.account : req.account;
 
+      // vesselLimit 체크 (admin은 면제)
+      if (req.accountRole !== "admin") {
+        const [existingCount, acct] = await Promise.all([
+          prisma.vessel.count({ where: { account } }),
+          prisma.account.findUnique({ where: { name: account }, select: { vesselLimit: true } }),
+        ]);
+        const limit = acct?.vesselLimit ?? 100;
+        if (existingCount >= limit) {
+          return res.status(400).json({ error: `선박 등록 한도(${limit}척)에 도달했습니다. 관리자에게 문의하세요.` });
+        }
+      }
+
       const existingCount = await prisma.vessel.count({ where: { account } });
       const assignedColor = color || VESSEL_COLORS[existingCount % VESSEL_COLORS.length];
       const vessel = await prisma.vessel.create({
@@ -217,7 +319,8 @@ export default function vesselRoutes(prisma) {
         poller.forceUpdate(null, [mmsi]).catch(() => {});
       }
     } catch (e) {
-      if (e.code === "P2002") return res.status(409).json({ error: "Vessel already registered" });
+      if (e.code === "P2002") return res.status(409).json({ error: "이미 해당 계정에 등록된 선박입니다" });
+      logger.error("[vessels] add vessel error:", e.message);
       res.status(500).json({ error: "Internal server error" });
     }
   });
@@ -265,20 +368,45 @@ export default function vesselRoutes(prisma) {
 
       const days = Math.min(Math.max(parseInt(req.body.days) || 7, 1), 30);
 
+      if (!(await requireHistoryPassword(prisma, req, res))) return;
+
       if (!vessel.imo && !vessel.mmsi) {
         return res.status(400).json({ error: "선박의 IMO 또는 MMSI가 필요합니다" });
       }
 
       const params = vessel.imo ? { imo: vessel.imo, days } : { mmsi: vessel.mmsi, days };
-      const result = await apiCall("vessel_hist", params);
-      await logApiUsage(prisma, "vessel_hist", days, req.account);
+      const transport = await requestDatalastic(
+        "vessel_history",
+        params,
+        req.account,
+        { costPerAttempt: days },
+      );
+      const result = transport.response;
+      const creditsUsed = days * transport.attempts;
 
-      if (!result || (!result.data && !Array.isArray(result))) {
-        return res.status(502).json({ error: "Datalastic API 응답 없음", credits_used: days });
+      if (!result) {
+        return res.status(502).json({
+          error: "Datalastic API unavailable",
+          credits_used: creditsUsed,
+        });
+      }
+      if (!result.data && !Array.isArray(result)) {
+        const isNotFound = result?.meta?.success === false;
+        const errMsg = isNotFound
+          ? "vessel_history API를 사용할 수 없습니다 (현재 구독 플랜 미포함). 관리자에게 문의하세요."
+          : "Datalastic API 응답 없음";
+        return res.status(502).json({ error: errMsg, credits_used: creditsUsed });
       }
 
-      const records = Array.isArray(result.data) ? result.data : (Array.isArray(result) ? result : []);
-      if (records.length === 0) return res.json({ fetched: 0, stored: 0, credits_used: days });
+      const payload = result?.data?.positions;
+      const records = Array.isArray(payload)
+        ? payload
+        : Array.isArray(result)
+          ? result
+          : Array.isArray(result?.positions)
+            ? result.positions
+            : [];
+      if (records.length === 0) return res.json({ fetched: 0, stored: 0, credits_used: creditsUsed });
 
       let stored = 0;
       const sorted = records
@@ -289,18 +417,24 @@ export default function vesselRoutes(prisma) {
         })
         .sort((a, b) => (a.last_position_epoch || a.timestamp_epoch || 0) - (b.last_position_epoch || b.timestamp_epoch || 0));
 
+      // 히스토리 저장 직전 가장 오래된 레코드보다 이전 위치 1회만 조회 (N+1 제거)
+      const firstEpoch = sorted.length > 0 ? (sorted[0].last_position_epoch || sorted[0].timestamp_epoch) : null;
+      const firstTs = firstEpoch ? new Date(firstEpoch * 1000) : null;
+      let prevPos = firstTs ? await prisma.position.findFirst({
+        where: { vesselId: id, suspicious: false, timestamp: { lt: firstTs } },
+        orderBy: { timestamp: "desc" },
+        select: { lat: true, lon: true, timestamp: true },
+      }) : null;
+
       for (const r of sorted) {
         const lat = parseFloat(r.lat);
         const lon = parseFloat(r.lon);
         const epoch = r.last_position_epoch || r.timestamp_epoch;
         const timestamp = epoch ? new Date(epoch * 1000) : null;
         if (!timestamp || isNaN(timestamp.getTime())) continue;
+        const parsedCog = parseFloat(r.course);
+        const parsedSog = parseFloat(r.speed);
 
-        const prevPos = await prisma.position.findFirst({
-          where: { vesselId: id, suspicious: false, timestamp: { lt: timestamp } },
-          orderBy: { timestamp: "desc" },
-          select: { lat: true, lon: true, timestamp: true },
-        });
         const { suspicious, impliedSpeed, reason } = checkSpoofing(prevPos, lat, lon, timestamp);
 
         try {
@@ -308,8 +442,8 @@ export default function vesselRoutes(prisma) {
             where: { vesselId_timestamp: { vesselId: id, timestamp } },
             create: {
               vesselId: id, lat, lon,
-              cog: parseFloat(r.course) || null,
-              sog: parseFloat(r.speed) || null,
+              cog: Number.isNaN(parsedCog) ? null : parsedCog,
+              sog: Number.isNaN(parsedSog) ? null : parsedSog,
               heading: r.heading != null && r.heading !== 511 ? parseInt(r.heading) : null,
               navStatus: r.navigation_status || null,
               destination: r.destination || null,
@@ -319,11 +453,13 @@ export default function vesselRoutes(prisma) {
             update: {},
           });
           stored++;
+          // 다음 레코드 스푸핑 탐지를 위해 메모리에서 prevPos 갱신 (DB 재조회 없음)
+          if (!suspicious) prevPos = { lat, lon, timestamp };
         } catch { /* skip duplicates */ }
       }
 
-      console.log(`[History] ${vessel.name || vessel.mmsi}: ${records.length} fetched, ${stored} stored, ${days} credits (${req.account})`);
-      res.json({ fetched: records.length, stored, credits_used: days });
+      logger.info(`[History] ${vessel.name || vessel.mmsi}: ${records.length} fetched, ${stored} stored, ${creditsUsed} credits (${req.account})`);
+      res.json({ fetched: records.length, stored, credits_used: creditsUsed });
     } catch (e) {
       console.error("[History] Error:", e.message);
       res.status(500).json({ error: "Internal server error" });

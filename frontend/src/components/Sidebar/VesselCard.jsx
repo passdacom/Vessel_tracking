@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { buildHistoryRequestBody, validateHistoryPassword } from '../../historyAuth.js';
 
 // ETA 포맷: 'Mar 02, 14:30 UTC' 형태
 function formatEta(eta) {
@@ -55,6 +56,7 @@ export default function VesselCard({
     apiFetch,
     onStartPlayback,
     onHistoryFetched,
+    onStartEta,
 }) {
     const [editing, setEditing] = useState(false);
     const [alias, setAlias] = useState(vessel.alias || vessel.name || '');
@@ -63,6 +65,7 @@ export default function VesselCard({
     const [showGroupChange, setShowGroupChange] = useState(false); // 그룹변경 드롭다운
     const [showHistory, setShowHistory] = useState(false); // 히스토리 패널 토글
     const [historyDays, setHistoryDays] = useState(7);
+    const [historyPassword, setHistoryPassword] = useState('');
     const [historyLoading, setHistoryLoading] = useState(false);
     const [historyResult, setHistoryResult] = useState(null);
 
@@ -89,19 +92,27 @@ export default function VesselCard({
     async function handleFetchHistory(e) {
         e.stopPropagation();
         if (!apiFetch) return;
+
+        const passwordError = validateHistoryPassword(historyPassword);
+        if (passwordError) {
+            setHistoryResult(`오류: ${passwordError}`);
+            return;
+        }
+
         setHistoryLoading(true);
         setHistoryResult(null);
         try {
             const res = await apiFetch(`/vessels/${vessel.id}/history`, {
                 method: 'POST',
-                body: JSON.stringify({ days: historyDays }),
+                body: JSON.stringify(buildHistoryRequestBody(historyDays, historyPassword)),
             });
             const data = await res.json();
             if (res.ok) {
                 setHistoryResult(`${data.stored}건 저장 (${data.credits_used} 크레딧 소모)`);
+                setHistoryPassword('');
                 if (onHistoryFetched) onHistoryFetched(vessel.id);
             } else {
-                setHistoryResult(`오류: ${data.error}`);
+                setHistoryResult(`오류: ${data.error || '히스토리 조회 실패'}`);
             }
         } catch {
             setHistoryResult('네트워크 오류');
@@ -172,6 +183,7 @@ export default function VesselCard({
     // ── 표시 모드 ──
     return (
         <div
+            id={`vessel-card-${vessel.id}`}
             onClick={onSelect}
             className={`bg-gray-800 rounded-lg py-1.5 px-3 cursor-pointer transition-all border ${isSelected
                 ? 'border-blue-500 bg-gray-750'
@@ -184,10 +196,19 @@ export default function VesselCard({
                 <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: vessel.color }} />
 
                 {/* 선박명 + 숨기기 버튼 */}
-                <div className="flex-1 flex items-center min-w-0 pr-1">
-                    <span className="text-white font-semibold text-sm truncate tracking-tight mr-1">
+                <div className="flex-1 flex items-center min-w-0 pr-1 gap-1">
+                    <span className="text-white font-semibold text-sm truncate tracking-tight">
                         {displayName}
                     </span>
+                    {/* HRA 배지: 현재 전쟁위험구역 내 위치 */}
+                    {latestPosition?.currentZones?.length > 0 && (
+                        <span
+                            className="flex-shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-red-700 text-red-100 border border-red-500 leading-none"
+                            title={`HRA 구역: ${latestPosition.currentZones.join(', ')}`}
+                        >
+                            HRA
+                        </span>
+                    )}
                     <button
                         onClick={(e) => { e.stopPropagation(); if (onToggleVisible) onToggleVisible(); }}
                         className={`p-0.5 rounded transition flex-shrink-0 ${isVisible ? 'text-blue-400 hover:text-blue-300' : 'text-gray-500 hover:text-gray-400'}`}
@@ -303,8 +324,8 @@ export default function VesselCard({
                                 </div>
                             )}
 
-                            {/* ── 액션 버튼: 재생 / 히스토리 / 그룹 ── */}
-                            <div className="flex gap-1.5 pt-0.5">
+                            {/* ── 액션 버튼: 재생 / ETA / 히스토리 / 그룹 ── */}
+                            <div className="flex gap-1.5 pt-0.5 flex-wrap">
                                 <button
                                     onClick={(e) => { e.stopPropagation(); if (onStartPlayback) onStartPlayback(vessel.id); }}
                                     className="flex-1 py-1 bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white text-[11px] rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-blue-500"
@@ -312,6 +333,15 @@ export default function VesselCard({
                                 >
                                     ▶ 재생
                                 </button>
+                                {latestPosition && (
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); if (onStartEta) onStartEta(vessel.id); }}
+                                        className="flex-1 py-1 bg-gray-700 hover:bg-amber-700 text-gray-400 hover:text-amber-100 text-[11px] rounded transition flex items-center justify-center gap-1 border border-gray-600 hover:border-amber-500"
+                                        title="지도에서 목적지를 클릭하여 거리/ETA를 계산합니다"
+                                    >
+                                        🧭 ETA
+                                    </button>
+                                )}
                                 <button
                                     onClick={(e) => { e.stopPropagation(); setShowHistory(v => !v); }}
                                     className={`flex-1 py-1 text-[11px] rounded transition flex items-center justify-center gap-1 border ${showHistory ? 'bg-indigo-700 border-indigo-500 text-white' : 'bg-gray-700 border-gray-600 text-gray-400 hover:text-white hover:border-indigo-500'}`}
@@ -330,6 +360,16 @@ export default function VesselCard({
                             {/* 히스토리 가져오기 (토글 패널) */}
                             {showHistory && (
                                 <div className="bg-gray-750 rounded p-2 border border-gray-700 space-y-1.5">
+                                    <input
+                                        type="password"
+                                        value={historyPassword}
+                                        onChange={(e) => setHistoryPassword(e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        onKeyDown={(e) => e.stopPropagation()}
+                                        placeholder="관리자 비밀번호"
+                                        autoComplete="off"
+                                        className="w-full bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 placeholder:text-gray-500"
+                                    />
                                     <div className="flex items-center gap-2">
                                         <select
                                             value={historyDays}

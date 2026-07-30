@@ -3,5 +3,17 @@ node_modules/
 dist/
 build/
 *.log
+*.log.[0-9]*
+logs/*.log
+logs/*
+!logs/.gitkeep
+backend/logs/*
+!backend/logs/.gitkeep
+frontend/logs/*
+!frontend/logs/.gitkeep
 prisma/dev.db
 .DS_Store
+.gstack/
+.claude/settings.local.json
+.worktrees/
+graphify-out/

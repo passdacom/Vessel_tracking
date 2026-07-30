@@ -9,7 +9,7 @@ datasource db {
 
 model Vessel {
   id           Int        @id @default(autoincrement())
-  mmsi         String     @unique
+  mmsi         String
   name         String?
   alias        String?
   account      String     @default("kb")
@@ -32,9 +32,14 @@ model Vessel {
   infoFetched  Boolean    @default(false)
   active       Boolean    @default(true)
   createdAt    DateTime   @default(now())
-  positions    Position[]
+  positions      Position[]
+  zoneEvents     ZoneEvent[]
+  vesselAccounts VesselAccount[]
 
+  @@unique([account, mmsi])
   @@index([account])
+  @@index([active])
+  @@index([infoFetched])
 }
 
 model Position {
@@ -56,6 +61,7 @@ model Position {
 
   @@unique([vesselId, timestamp])
   @@index([vesselId, timestamp(sort: Desc)])
+  @@index([vesselId, suspicious, timestamp(sort: Desc)])
 }
 
 model Incident {
@@ -86,11 +92,35 @@ model Port {
 }
 
 model Account {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique  // "kb", "kdgc", "admin"
+  password    String
+  role        String   @default("user") // "user", "admin"
+  vesselLimit Int      @default(100)    // 계정별 최대 선박 수
+  createdAt   DateTime @default(now())
+}
+
+// Legacy per-account vessel settings table retained to avoid data loss on db push.
+// Current app reads account/alias/color/companyType from Vessel directly.
+model VesselAccount {
+  id          Int      @id @default(autoincrement())
+  vesselId    Int
+  vessel      Vessel   @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  account     String
+  alias       String?
+  color       String   @default("#3b82f6")
+  companyType String   @default("자사간사")
+  createdAt   DateTime @default(now())
+
+  @@unique([vesselId, account])
+  @@index([account])
+}
+
+model SystemConfig {
   id        Int      @id @default(autoincrement())
-  name      String   @unique  // "kb", "kdgc", "admin"
-  password  String
-  role      String   @default("user") // "user", "admin"
-  createdAt DateTime @default(now())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
 }
 
 model ApiUsage {
@@ -104,11 +134,47 @@ model ApiUsage {
   @@index([account])
 }
 
+model ZoneEvent {
+  id           Int      @id @default(autoincrement())
+  vesselId     Int
+  vessel       Vessel   @relation(fields: [vesselId], references: [id], onDelete: Cascade)
+  zoneName     String   // e.g. "JWC War Risk Zone - Persian Gulf"
+  eventType    String   // "entry" | "exit"
+  lat          Float    // 감지 시점 선박 위치
+  lon          Float
+  posTimestamp DateTime // position.timestamp (실제 위치 신호 시간)
+  createdAt    DateTime @default(now())
+
+  @@index([vesselId, posTimestamp(sort: Desc)])
+  @@index([vesselId, zoneName, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([eventType])
+}
+
 model SharedView {
   id        Int      @id @default(autoincrement())
   token     String   @unique
   label     String
   vesselIds String   // JSON array of vessel IDs e.g. "[3,4,5]"
+  createdBy String?
   createdAt DateTime @default(now())
   expiresAt DateTime?
+
+  @@index([createdBy])
+  @@index([expiresAt])
+}
+
+model ShippingLane {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  coordinates Json     // [[lon, lat], ...] GeoJSON 순서로 저장
+  color       String   @default("#f59e0b")
+  active      Boolean  @default(true)
+  createdBy   String   @default("admin")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([active])
+  @@index([createdAt(sort: Desc)])
 }

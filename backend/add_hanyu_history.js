@@ -42,7 +42,7 @@ async function main() {
     skipDuplicates: true,
   });
   
-  console.log();
+  console.log(`Successfully added ${created.count} HANYU historical positions`);
 }
 
-main().catch(console.error).finally(() => prisma.());
+main().catch(console.error).finally(() => prisma.$disconnect());

@@ -4,7 +4,8 @@ const prisma = new PrismaClient();
 const API_BASE = 'https://api.datalastic.com/api/v0';
 
 function apiCall(endpoint, params) {
-  const apiKey = '33ceea11-c650-45ae-a459-a8941203241b';
+  const apiKey = process.env.DATALASTIC_API_KEY;
+  if (!apiKey) throw new Error('DATALASTIC_API_KEY is required');
   const qs = new URLSearchParams({ 'api-key': apiKey, ...params }).toString();
   const url = `${API_BASE}/${endpoint}?${qs}`;
   return new Promise((resolve) => {

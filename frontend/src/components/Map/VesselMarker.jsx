@@ -1,21 +1,32 @@
-import React, { useMemo } from 'react';
-import { Marker, Popup } from 'react-leaflet';
+import React, { useMemo, useState } from 'react';
+import { Marker, Popup, Tooltip } from 'react-leaflet';
 import L from 'leaflet';
 
-function createShipIcon(color, rotation, isSelected, isStale) {
-    const size = isSelected ? 34 : 26;
+// labelDirection에 따라 tooltipAnchor를 아이콘 엣지로 설정
+function getTooltipAnchor(direction, half) {
+    switch (direction) {
+        case 'bottom': return [0,  half];
+        case 'right':  return [half, 0];
+        case 'left':   return [-half, 0];
+        case 'top':
+        default:       return [0, -half];
+    }
+}
 
-    // stale 선박은 회색으로 채우고 투명도 낮춤
+function createShipIcon(color, rotation, isSelected, isStale, labelDirection = 'top') {
+    const size = isSelected ? 34 : 26;
+    const half = size / 2;
+
     const fillColor = isStale ? '#888888' : color;
     const strokeColor = isStale ? '#aaaaaa' : 'white';
 
     const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 28" width="${size}" height="${size}">
-      <polygon 
-        points="12,2 21,24 12,19 3,24" 
-        fill="${fillColor}" 
-        stroke="${strokeColor}" 
-        stroke-width="1.5" 
+      <polygon
+        points="12,2 21,24 12,19 3,24"
+        fill="${fillColor}"
+        stroke="${strokeColor}"
+        stroke-width="1.5"
         stroke-linejoin="round"
         ${isSelected ? `filter="url(#sel-glow)"` : ''}
       />
@@ -23,7 +34,6 @@ function createShipIcon(color, rotation, isSelected, isStale) {
     </svg>
   `;
 
-    // stale 선박: 전체 마커 div에 opacity 적용
     const wrapperStyle = isStale
         ? `transform: rotate(${rotation}deg); transform-origin: center; line-height: 0; opacity: 0.5;`
         : `transform: rotate(${rotation}deg); transform-origin: center; line-height: 0;`;
@@ -32,9 +42,9 @@ function createShipIcon(color, rotation, isSelected, isStale) {
         html: `<div style="${wrapperStyle}">${svg}</div>`,
         className: 'custom-vessel-icon',
         iconSize: [size, size],
-        iconAnchor: [size / 2, size / 2],
-        popupAnchor: [0, -size / 2],
-        tooltipAnchor: [0, 0]
+        iconAnchor: [half, half],
+        popupAnchor: [0, -half],
+        tooltipAnchor: getTooltipAnchor(labelDirection, half),
     });
 }
 
@@ -67,15 +77,40 @@ function formatEta(eta) {
     );
 }
 
-export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24 }) {
+export default function VesselMarker({ vessel, position, isSelected, onClick, trackHours = 24, labelDirection = 'top', showLabels = true, onStartEta }) {
     const rotation = position.heading ?? position.cog ?? 0;
 
     const isStale = Date.now() - new Date(position.timestamp) > trackHours * 60 * 60 * 1000;
 
     const icon = useMemo(
-        () => createShipIcon(vessel.color, rotation, isSelected, isStale),
-        [vessel.color, rotation, isSelected, isStale]
+        () => createShipIcon(vessel.color, rotation, isSelected, isStale, labelDirection),
+        [vessel.color, rotation, isSelected, isStale, labelDirection]
     );
+
+    const [fuPw, setFuPw] = useState('');
+    const [fuLoading, setFuLoading] = useState(false);
+    const [fuResult, setFuResult] = useState(null); // null | 'ok' | 'err' | 'auth'
+
+    const handleForceUpdate = async (e) => {
+        e.stopPropagation();
+        if (!fuPw || fuLoading) return;
+        setFuLoading(true);
+        setFuResult(null);
+        try {
+            const res = await fetch('/api/force-update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${fuPw}`,
+                },
+                body: JSON.stringify({ mmsiList: [vessel.mmsi] }),
+            });
+            if (res.status === 403) { setFuResult('auth'); }
+            else if (res.ok) { setFuResult('ok'); }
+            else { setFuResult('err'); }
+        } catch { setFuResult('err'); }
+        setFuLoading(false);
+    };
 
     const displayName = vessel.alias || vessel.name || vessel.mmsi;
     const vesselType = vessel.typeSpecific || vessel.vesselType;
@@ -88,6 +123,9 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
     const labelStyle = { color: '#9ca3af', paddingRight: 10, paddingBottom: 3, fontSize: 12 };
     const valueStyle = { fontWeight: 500, fontSize: 12 };
 
+    const labelText = (isStale ? '⏸ ' : '') + displayName;
+    const labelColor = isStale ? '#9ca3af' : vessel.color;
+
     return (
         <Marker
             position={[position.lat, position.lon]}
@@ -95,6 +133,26 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
             eventHandlers={{ click: onClick }}
             zIndexOffset={isSelected ? 1000 : 0}
         >
+            {/* 선박명 라벨: 불투명 배경 박스, 방향은 충돌 회피 알고리즘이 결정 */}
+            {showLabels ? (
+                <Tooltip
+                    key={labelDirection}
+                    permanent
+                    direction={labelDirection}
+                    className="vessel-name-tooltip"
+                    interactive={false}
+                >
+                    <span style={{ color: labelColor }}>{labelText}</span>
+                </Tooltip>
+            ) : (
+                <Tooltip
+                    className="vessel-name-tooltip"
+                    interactive={false}
+                >
+                    <span style={{ color: labelColor }}>{labelText}</span>
+                </Tooltip>
+            )}
+
             <Popup>
                 <div style={{ minWidth: 200, fontFamily: 'sans-serif' }}>
                     {/* stale 배지 */}
@@ -187,6 +245,82 @@ export default function VesselMarker({ vessel, position, isSelected, onClick, tr
                             </tr>
                         </tbody>
                     </table>
+
+                    {/* ETA 계산 버튼 */}
+                    {onStartEta && (
+                      <div style={{ borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 7 }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); onStartEta(vessel.id); }}
+                          style={{
+                            width: '100%',
+                            fontSize: 11,
+                            padding: '5px 0',
+                            borderRadius: 5,
+                            border: '1px solid #6366f1',
+                            background: '#eef2ff',
+                            color: '#4338ca',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                          }}
+                        >
+                          🧭 ETA / 거리 계산
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 강제 갱신 */}
+                    <div style={{ borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 7 }}>
+                        {fuResult === 'ok' ? (
+                            <div style={{ fontSize: 11, color: '#16a34a', textAlign: 'center', padding: '3px 0' }}>
+                                ✓ 갱신 요청 완료
+                            </div>
+                        ) : (
+                            <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                                <input
+                                    type="password"
+                                    value={fuPw}
+                                    onChange={(e) => { setFuPw(e.target.value); setFuResult(null); }}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleForceUpdate(e); }}
+                                    onClick={(e) => e.stopPropagation()}
+                                    placeholder="비밀번호"
+                                    style={{
+                                        flex: 1,
+                                        fontSize: 11,
+                                        padding: '4px 7px',
+                                        border: fuResult === 'auth' ? '1px solid #f87171' : '1px solid #d1d5db',
+                                        borderRadius: 5,
+                                        outline: 'none',
+                                        color: '#374151',
+                                        background: '#f9fafb',
+                                        minWidth: 0,
+                                    }}
+                                />
+                                <button
+                                    onClick={handleForceUpdate}
+                                    disabled={fuLoading || !fuPw}
+                                    style={{
+                                        fontSize: 11,
+                                        padding: '4px 9px',
+                                        borderRadius: 5,
+                                        border: '1px solid #d1d5db',
+                                        background: fuLoading || !fuPw ? '#f3f4f6' : '#f1f5f9',
+                                        color: fuLoading || !fuPw ? '#9ca3af' : '#374151',
+                                        cursor: fuLoading || !fuPw ? 'default' : 'pointer',
+                                        whiteSpace: 'nowrap',
+                                        flexShrink: 0,
+                                    }}
+                                >
+                                    {fuLoading ? '…' : '강제 갱신'}
+                                </button>
+                            </div>
+                        )}
+                        {fuResult === 'auth' && (
+                            <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3 }}>비밀번호가 올바르지 않습니다</div>
+                        )}
+                        {fuResult === 'err' && (
+                            <div style={{ fontSize: 10, color: '#ef4444', marginTop: 3 }}>요청 실패. 다시 시도해주세요</div>
+                        )}
+                    </div>
                 </div>
             </Popup>
         </Marker>
