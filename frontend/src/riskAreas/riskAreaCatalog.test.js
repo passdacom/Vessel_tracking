@@ -55,6 +55,9 @@ test("catalog presents current JWLA-034 defined waters by default and keeps vers
 
   const areaPanelSource = fs.readFileSync(new URL("./AreaPanel.jsx", import.meta.url), "utf8");
   assert.doesNotMatch(areaPanelSource, /색은 033 기준\/현재 backend 경보경계/);
+  assert.match(areaPanelSource, /JWLA Current Reference/);
+  assert.doesNotMatch(areaPanelSource, /JWLA Version Comparison/);
+  assert.doesNotMatch(areaPanelSource, /기존 구역 위에.*북쪽 확장분만/);
 
   assert.equal(bySection("jwc-installations").items.length, 2);
   assert.equal(bySection("jwc-countries").items.length, 23);
@@ -81,12 +84,12 @@ test("map renders the canonical current asset and keeps installation-context EEZ
   assert.doesNotMatch(restrictedSource, /const AREA_URL = "\/risk-areas\/jwla-034-amendments\.geojson"/);
 });
 
-test("stored legacy visibility migrates once to the current JWLA-034 default without losing appearance", () => {
+test("stored explicit visibility migrates once without losing user choices or appearance", () => {
   const legacyKey = bySection("contract-alerts").items[0].layerKeys[0];
   const migrated = migrateRiskAreaSettings({
     [legacyKey]: { visible: true, color: "#123456", opacity: 0.2 },
   });
-  assert.equal(migrated[legacyKey].visible, false);
+  assert.equal(migrated[legacyKey].visible, true);
   assert.equal(migrated[legacyKey].color, "#123456");
   assert.equal(migrated.__jwlaCurrentDefaultsVersion, 1);
 

@@ -403,17 +403,7 @@ export function allRiskAreaItems() {
 export function migrateRiskAreaSettings(settings) {
   const current = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
   if (current.__jwlaCurrentDefaultsVersion === 1) return current;
-
-  const next = { ...current, __jwlaCurrentDefaultsVersion: 1 };
-  for (const areaItem of [...CONTRACT_ALERT_ITEMS, ...JWC_034_AMENDMENTS]) {
-    for (const layerKey of areaItem.layerKeys) {
-      next[layerKey] = {
-        ...current[layerKey],
-        visible: false,
-      };
-    }
-  }
-  return next;
+  return { ...current, __jwlaCurrentDefaultsVersion: 1 };
 }
 
 export function shouldLoadSectionLayers(sectionId, settings = {}, focusKey = null) {
