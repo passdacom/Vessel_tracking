@@ -3,6 +3,7 @@ import { GeoJSON, useMap } from "react-leaflet";
 import { getLayerDefaults, shouldLoadSectionLayers } from "../../riskAreas/riskAreaCatalog.js";
 
 const AREA_URL = "/risk-areas/jwla-034-reference.geojson";
+const AMENDMENT_URL = "/risk-areas/jwla-034-amendments.geojson";
 const COUNTRY_URL = "/risk-areas/jwla-034-countries.geojson";
 const INSTALLATION_URL = "/risk-areas/jwla-034-installations.geojson";
 const CONTRACT_ALERT_URLS = [
@@ -51,10 +52,12 @@ function featureByName(collections, name) {
 export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   const map = useMap();
   const [areas, setAreas] = useState(null);
+  const [amendments, setAmendments] = useState(null);
   const [countries, setCountries] = useState(null);
   const [installations, setInstallations] = useState(null);
   const [contractAlerts, setContractAlerts] = useState(null);
   const areaRef = useRef(null);
+  const amendmentRef = useRef(null);
   const countryRef = useRef(null);
   const installationRef = useRef(null);
   const contractAlertRef = useRef(null);
@@ -79,8 +82,25 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   }, []);
 
   const shouldLoadCountries = shouldLoadSectionLayers("jwc-countries", zoneSettings, focusArea?.key);
+  const shouldLoadAmendments = shouldLoadSectionLayers("jwc-034-amendment", zoneSettings, focusArea?.key);
   const shouldLoadInstallations = shouldLoadSectionLayers("jwc-installations", zoneSettings, focusArea?.key);
   const shouldLoadContractAlerts = shouldLoadSectionLayers("contract-alerts", zoneSettings, focusArea?.key);
+
+  useEffect(() => {
+    if (!shouldLoadAmendments || amendments) return undefined;
+    const controller = new AbortController();
+    const loadAmendments = async () => {
+      try {
+        const response = await fetch(AMENDMENT_URL, { signal: controller.signal });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        setAmendments(await response.json());
+      } catch (error) {
+        if (error.name !== "AbortError") console.error("JWLA-034 amendment load error:", error);
+      }
+    };
+    loadAmendments();
+    return () => controller.abort();
+  }, [shouldLoadAmendments, amendments]);
 
   useEffect(() => {
     if (!shouldLoadCountries || countries) return undefined;
@@ -177,6 +197,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
 
   useEffect(() => {
     areaRef.current?.setStyle(getStyle);
+    amendmentRef.current?.setStyle(getStyle);
     countryRef.current?.setStyle(getStyle);
     installationRef.current?.setStyle(getStyle);
     contractAlertRef.current?.setStyle(getStyle);
@@ -184,10 +205,10 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
 
   useEffect(() => {
     if (!focusArea?.key) return;
-    const feature = featureByName([areas, countries, installations, contractAlerts], focusArea.key);
+    const feature = featureByName([areas, amendments, countries, installations, contractAlerts], focusArea.key);
     const bounds = getBounds(feature);
     if (bounds) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 7, animate: true });
-  }, [focusArea, areas, countries, installations, contractAlerts, map]);
+  }, [focusArea, areas, amendments, countries, installations, contractAlerts, map]);
 
   return (
     <>
@@ -223,6 +244,15 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
           ref={areaRef}
           key={`jwla034-current-${areas.features?.length || 0}`}
           data={areas}
+          style={getStyle}
+          onEachFeature={onEachFeature}
+        />
+      )}
+      {amendments && (
+        <GeoJSON
+          ref={amendmentRef}
+          key={`jwla034-amendments-${amendments.features?.length || 0}`}
+          data={amendments}
           style={getStyle}
           onEachFeature={onEachFeature}
         />

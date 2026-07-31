@@ -72,6 +72,8 @@ test("catalog presents current JWLA-034 defined waters by default and keeps vers
 test("map renders the canonical current asset and keeps installation-context EEZ polygons unfilled", () => {
   const restrictedSource = fs.readFileSync(new URL("../components/Map/RestrictedZone.jsx", import.meta.url), "utf8");
   assert.match(restrictedSource, /jwla-034-reference\.geojson/);
+  assert.match(restrictedSource, /jwla-034-amendments\.geojson/);
+  assert.match(restrictedSource, /shouldLoadSectionLayers\("jwc-034-amendment"/);
   assert.match(restrictedSource, /scope === "defined-waters"/);
   assert.match(restrictedSource, /geometryRole === "installation-context-only"/);
   assert.match(restrictedSource, /scope === "installation-context-only"/);
