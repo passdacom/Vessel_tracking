@@ -10,6 +10,7 @@ import {
   applySectionAppearance,
   getCalendarStatus,
   isItemVisible,
+  migrateRiskAreaSettings,
   resetSectionAppearance,
   shouldLoadSectionLayers,
 } from "./riskAreaCatalog.js";
@@ -23,29 +24,40 @@ function featureByName(collection, name) {
   return collection.features.find((feature) => feature.properties?.name === name);
 }
 
-test("catalog presents JWLA-033 as the visible baseline and JWLA-034 as a distinct amendment", () => {
+test("catalog presents current JWLA-034 defined waters by default and keeps version comparison optional", () => {
   assert.equal(JWLA_REFERENCE.circular, "JWLA-034");
   assert.equal(JWLA_REFERENCE.previousCircular, "JWLA-033");
   assert.equal(JWLA_REFERENCE.publishedAt, "2026-07-29");
   assert.match(JWLA_REFERENCE.sourceUrl, /lmalloyds\.com\/.*JWLA-034/);
   assert.equal(JWLA_REFERENCE.sourceSha256, "125e507bbd187051315bdf80ae30583bc92ec9ad2d280d02fac2d10a019d03b9");
 
+  const current = bySection("jwc-034-current");
   const amendment = bySection("jwc-034-amendment");
   const baseline = bySection("contract-alerts");
+  assert.deepEqual(current.items.map((areaItem) => areaItem.layerKeys[0]), [
+    "JWLA 034 - Combined Middle East and Southern Red Sea Waters",
+    "JWLA 034 - Black Sea & Sea of Azov",
+    "JWLA 034 - Gulf of Guinea",
+    "JWLA 034 - Cabo Delgado",
+  ]);
+  assert.ok(current.items.every((areaItem) => areaItem.defaultVisible === true));
   assert.equal(amendment.items.length, 1);
   assert.equal(amendment.items[0].layerKeys[0], "JWLA 034 Amendment - Red Sea 18N to 25.5N");
-  assert.equal(amendment.items[0].defaultVisible, true);
+  assert.equal(amendment.items[0].defaultVisible, false);
   assert.equal(amendment.color, "#facc15");
   assert.equal(amendment.items[0].color, "#facc15");
   assert.equal(baseline.items.length, 22);
   assert.equal(baseline.defaultOpen, false);
   assert.equal(baseline.color, "#ef4444");
-  assert.ok(baseline.items.every((areaItem) => areaItem.defaultVisible === true));
+  assert.ok(baseline.items.every((areaItem) => areaItem.defaultVisible === false));
   assert.ok(baseline.items.every((areaItem) => areaItem.color === "#ef4444"));
   assert.match(baseline.label, /JWLA-033 Baseline/);
 
   const areaPanelSource = fs.readFileSync(new URL("./AreaPanel.jsx", import.meta.url), "utf8");
   assert.doesNotMatch(areaPanelSource, /색은 033 기준\/현재 backend 경보경계/);
+  assert.match(areaPanelSource, /JWLA Current Reference/);
+  assert.doesNotMatch(areaPanelSource, /JWLA Version Comparison/);
+  assert.doesNotMatch(areaPanelSource, /기존 구역 위에.*북쪽 확장분만/);
 
   assert.equal(bySection("jwc-installations").items.length, 2);
   assert.equal(bySection("jwc-countries").items.length, 23);
@@ -58,6 +70,34 @@ test("catalog presents JWLA-033 as the visible baseline and JWLA-034 as a distin
   assert.ok(labels.includes("Eritrea"));
   assert.ok(!labels.includes("Pakistan"));
   assert.ok(!labels.includes("Mozambique (N.)"));
+});
+
+test("map renders the canonical current asset and keeps installation-context EEZ polygons unfilled", () => {
+  const restrictedSource = fs.readFileSync(new URL("../components/Map/RestrictedZone.jsx", import.meta.url), "utf8");
+  assert.match(restrictedSource, /jwla-034-reference\.geojson/);
+  assert.match(restrictedSource, /jwla-034-amendments\.geojson/);
+  assert.match(restrictedSource, /shouldLoadSectionLayers\("jwc-034-amendment"/);
+  assert.match(restrictedSource, /scope === "defined-waters"/);
+  assert.match(restrictedSource, /geometryRole === "installation-context-only"/);
+  assert.match(restrictedSource, /scope === "installation-context-only"/);
+  assert.match(restrictedSource, /fillOpacity: isInstallationContext \? 0/);
+  assert.doesNotMatch(restrictedSource, /const AREA_URL = "\/risk-areas\/jwla-034-amendments\.geojson"/);
+});
+
+test("stored explicit visibility migrates once without losing user choices or appearance", () => {
+  const legacyKey = bySection("contract-alerts").items[0].layerKeys[0];
+  const migrated = migrateRiskAreaSettings({
+    [legacyKey]: { visible: true, color: "#123456", opacity: 0.2 },
+  });
+  assert.equal(migrated[legacyKey].visible, true);
+  assert.equal(migrated[legacyKey].color, "#123456");
+  assert.equal(migrated.__jwlaCurrentDefaultsVersion, 1);
+
+  const userChanged = {
+    ...migrated,
+    [legacyKey]: { ...migrated[legacyKey], visible: true },
+  };
+  assert.deepEqual(migrateRiskAreaSettings(userChanged), userChanged);
 });
 
 test("IBF/ITF current designations and IWL calendar status do not copy the stale JWLA.ai panel", () => {
@@ -176,14 +216,14 @@ test("legacy contract-alert catalog stays aligned with the backend geofence inpu
   )));
   const catalogNames = new Set(bySection("contract-alerts").items.flatMap((item) => item.layerKeys));
   assert.deepEqual(catalogNames, expectedNames);
-  assert.equal(shouldLoadSectionLayers("contract-alerts", {}, null), true);
+  assert.equal(shouldLoadSectionLayers("contract-alerts", {}, null), false);
   assert.equal(shouldLoadSectionLayers("contract-alerts", {}, [...catalogNames][0]), true);
 
   const israel = bySection("contract-alerts").items.find((areaItem) => (
     areaItem.layerKeys.includes("Israel 12NM Territorial Waters")
   ));
   assert.ok(israel);
-  assert.equal(isItemVisible({}, israel), true);
+  assert.equal(isItemVisible({}, israel), false);
   assert.equal(isItemVisible({
     "Israel 12NM Territorial Waters": { visible: false },
   }, israel), false);

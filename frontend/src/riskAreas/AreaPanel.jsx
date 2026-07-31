@@ -62,16 +62,16 @@ export default function AreaPanel({
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
-              <h2 className="text-sm font-semibold text-white">JWLA Version Comparison</h2>
+              <h2 className="text-sm font-semibold text-white">JWLA Current Reference</h2>
               <span className="rounded bg-red-950 px-1.5 py-0.5 text-[9px] font-bold text-red-300 border border-red-800">
-                {JWLA_REFERENCE.previousCircular} 기준
+                {JWLA_REFERENCE.circular} 현재
               </span>
               <span className="rounded bg-yellow-950 px-1.5 py-0.5 text-[9px] font-bold text-yellow-300 border border-yellow-800">
-                {JWLA_REFERENCE.circular} 추가
+                {JWLA_REFERENCE.previousCircular} 비교 선택
               </span>
             </div>
             <p className="mt-1 text-[10px] leading-4 text-gray-400">
-              {JWLA_REFERENCE.previousCircular} 기존 구역 위에 {JWLA_REFERENCE.circular}의 북쪽 확장분만 별도 색상으로 표시합니다. Published {JWLA_REFERENCE.publishedAt}.
+              {JWLA_REFERENCE.circular} current defined waters를 기본 표시합니다. {JWLA_REFERENCE.previousCircular} backend 경계와 버전 delta는 선택형 비교 레이어입니다. Published {JWLA_REFERENCE.publishedAt}.
             </p>
           </div>
           <a

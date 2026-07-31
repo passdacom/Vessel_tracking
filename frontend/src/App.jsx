@@ -17,6 +17,7 @@ import PlaybackPanel from "./components/PlaybackPanel.jsx";
 import GlobalTimePanel from "./components/GlobalTimePanel.jsx";
 import ZoneSettingsPanel from "./components/ZoneSettingsPanel.jsx";
 import { clearAuthStorage, createApiFetch, getStoredAuthToken } from "./authSession.js";
+import { migrateRiskAreaSettings } from "./riskAreas/riskAreaCatalog.js";
 
 function ReportTable({ vessels, positions }) {
   const now = new Date().toUTCString();
@@ -227,7 +228,7 @@ function App() {
   const [zoneSettings, setZoneSettings] = useState(() => {
     try {
       const stored = localStorage.getItem(acctKey("vessel_zone_settings"));
-      return stored ? JSON.parse(stored) : {};
+      return migrateRiskAreaSettings(stored ? JSON.parse(stored) : {});
     } catch { return {}; }
   });
   const [areaFocus, setAreaFocus] = useState(null);
