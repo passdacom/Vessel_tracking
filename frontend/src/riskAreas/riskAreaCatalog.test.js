@@ -189,6 +189,51 @@ test("legacy contract-alert catalog stays aligned with the backend geofence inpu
   }, israel), false);
 });
 
+test("Black Sea defined waters follow the official JWLA boundary and exclude Georgian waters south of the Russia border", () => {
+  const global = JSON.parse(fs.readFileSync(new URL("../../public/war-risk-zone-global.geojson", import.meta.url), "utf8"));
+  const blackSea = featureByName(global, "JWLA 033 - Black Sea & Sea of Azov");
+  assert.ok(blackSea);
+
+  const bounds = turf.bbox(blackSea);
+  assert.ok(bounds[1] >= 43.38, `Black Sea zone extends south of the official Russia-Georgia endpoint: ${bounds[1]}`);
+  assert.equal(turf.booleanPointInPolygon(turf.point([41.4, 41.7]), blackSea), false);
+  assert.equal(turf.booleanPointInPolygon(turf.point([39.8, 43.5]), blackSea), true);
+  assert.match(blackSea.properties?.sourceDocument || "", /JWLA-033.*JWLA-034/);
+  assert.equal(blackSea.properties?.sourceSha256, "125e507bbd187051315bdf80ae30583bc92ec9ad2d280d02fac2d10a019d03b9");
+});
+
+test("Venezuela and Guyana EEZ geometries are explicitly installation context, not definitive transit geofences", () => {
+  const global = JSON.parse(fs.readFileSync(new URL("../../public/war-risk-zone-global.geojson", import.meta.url), "utf8"));
+  for (const [name, mrgid] of [
+    ["JWLA 033 - Venezuela (Offshore EEZ)", 8433],
+    ["JWLA 033 - Guyana (Offshore EEZ)", 8460],
+  ]) {
+    const feature = featureByName(global, name);
+    assert.ok(feature);
+    assert.equal(feature.properties?.geometryRole, "installation-context-only");
+    assert.equal(feature.properties?.detectionMode, "facility-visit-manual-review");
+    assert.equal(feature.properties?.manualReviewRequired, true);
+    assert.equal(feature.properties?.marineRegionsMrgid, mrgid);
+    assert.match(feature.properties?.warning || "", /transit/i);
+  }
+});
+
+test("offshore installation calls have a dedicated lazy-loaded render asset", () => {
+  const assetUrl = new URL("../../public/risk-areas/jwla-034-installations.geojson", import.meta.url);
+  assert.equal(fs.existsSync(assetUrl), true, "installation reference asset is missing");
+  const asset = JSON.parse(fs.readFileSync(assetUrl, "utf8"));
+  assert.deepEqual(asset.features.map((feature) => feature.properties?.name).sort(), [
+    "JWLA 034 - Guyana Offshore Installation Reference",
+    "JWLA 034 - Venezuela Offshore Installation Reference",
+  ]);
+  assert.ok(asset.features.every((feature) => feature.properties?.contractAlertEligible === false));
+  assert.ok(asset.features.every((feature) => turf.booleanValid(feature)));
+
+  const restrictedSource = fs.readFileSync(new URL("../components/Map/RestrictedZone.jsx", import.meta.url), "utf8");
+  assert.match(restrictedSource, /jwla-034-installations\.geojson/);
+  assert.match(restrictedSource, /shouldLoadSectionLayers\("jwc-installations"/);
+});
+
 test("JWLA-034 source GeoJSON remains valid and the UI amendment asset contains only the northward delta", () => {
   const areas = readGeoJSON("jwla-034-reference.geojson");
   const countries = readGeoJSON("jwla-034-countries.geojson");

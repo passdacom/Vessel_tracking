@@ -10,6 +10,20 @@
 import { readFileSync, writeFileSync } from "fs";
 import * as turf from "@turf/turf";
 
+const JWLA_CURRENT_SOURCE_URL = "https://lmalloyds.com/wp-content/uploads/2025/06/JWLA-034-Saudi-Arabia.pdf";
+const JWLA_CURRENT_SOURCE_SHA256 = "125e507bbd187051315bdf80ae30583bc92ec9ad2d280d02fac2d10a019d03b9";
+const BLACK_SEA_SOUTHERN_BOUNDARY = [
+  [29.7654833, 45.1809667],
+  [29.8523333, 45.18725],
+  [29.9927167, 45.1912333],
+  [30.0401333, 45.0892333],
+  [30.9787, 44.7770833],
+  [31.17495, 44.7374],
+  [31.4100333, 44.04795],
+  [31.3325667, 43.4515167],
+  [40.0099833, 43.3854333],
+];
+
 // ─────────────────────────────────────────────
 // Tier A: Gulf of Guinea — JWLA 033 명시 좌표
 // NW: 6°06'45"N, 1°12'E  SW: 0°40'S, 3°E  SE: 0°40'S, 8°42'E (Cape Lopez)
@@ -74,57 +88,31 @@ function makeBlackSeaAndAzov() {
     merged = blackSea;
   }
 
-  // ── JWLA 033 공식 경계 적용 ──────────────────────────────────────────
-  // 정의: "Sea of Azov and Black Sea waters enclosed by the following boundaries"
-  // 경계선: 우크라이나-루마니아 국경 → (중간 고해 지점들) → 러시아-조지아 국경
-  // 이 경계선 바깥(서쪽/남쪽)의 루마니아·불가리아·터키 해역 제외
-  //
-  // 좌표 변환 (도분 → 십진도):
-  //   a) 45°10.858'N, 29°45.929'E → (29.76548, 45.18097)
-  //      to 45°11.235'N, 29°51.140'E → (29.85233, 45.18725)
-  //   b) 45°11.474'N, 29°59.563'E → (29.99272, 45.19123)
-  //      45°5.354'N,  30°2.408'E  → (30.04013, 45.08923)
-  //   c) 44°46.625'N, 30°58.722'E → (30.97870, 44.77708)
-  //      44°44.244'N, 31°10.497'E → (31.17495, 44.73740)
-  //   d) 44°2.877'N,  31°24.602'E → (31.41003, 44.04795)
-  //      43°27.091'N, 31°19.954'E → (31.33257, 43.45152)
-  //   e) east to: 43°23.126'N, 40°0.599'E → (40.00998, 43.38543)
-  // ──────────────────────────────────────────────────────────────────────
-  console.log("  Applying JWLA 033 western boundary (excluding RO/BG/TR waters)...");
-  const exclusionPoly = turf.polygon([[
-    [29.76548, 45.18097],   // (시작) 우크라이나-루마니아 국경
-    [29.85233, 45.18725],   // (a) 45°11.235'N, 29°51.140'E
-    [29.99272, 45.19123],   // (b) 45°11.474'N, 29°59.563'E
-    [30.04013, 45.08923],   //     45°5.354'N,  30°2.408'E
-    [30.97870, 44.77708],   // (c) 44°46.625'N, 30°58.722'E
-    [31.17495, 44.73740],   //     44°44.244'N, 31°10.497'E
-    [31.41003, 44.04795],   // (d) 44°2.877'N,  31°24.602'E
-    [31.33257, 43.45152],   //     43°27.091'N, 31°19.954'E
-    [40.00998, 43.38543],   // (e) 러시아-조지아 국경 43°23.126'N, 40°0.599'E
-    // 흑해 외부로 나가서 루마니아·불가리아·터키 해역 포함하는 배제 영역 닫기
-    [40.00998, 40.00000],   // 남쪽으로 (흑해 바깥)
-    [26.50000, 40.00000],   // 서쪽으로 (터키·불가리아·루마니아 남쪽)
-    [26.50000, 47.00000],   // 북쪽으로 (루마니아 서쪽)
-    [29.76548, 45.18097],   // 닫기 (시작점으로)
+  // ── JWLA-033/034 공식 경계 적용 ───────────────────────────────────────
+  // 공식 좌표선의 북쪽 수역만 포함한다. 이전 구현은 남쪽 배제 polygon을
+  // 40°0.599'E에서 바로 닫아 그보다 동쪽인 조지아/터키 연안 수역을 남겼다.
+  console.log("  Applying official JWLA Black Sea boundary...");
+  const officialWatersEnvelope = turf.polygon([[
+    ...BLACK_SEA_SOUTHERN_BOUNDARY,
+    [45, BLACK_SEA_SOUTHERN_BOUNDARY.at(-1)[1]],
+    [45, 50],
+    [20, 50],
+    [20, BLACK_SEA_SOUTHERN_BOUNDARY[0][1]],
+    BLACK_SEA_SOUTHERN_BOUNDARY[0],
   ]]);
 
-  try {
-    const clipped = turf.difference(turf.featureCollection([merged, exclusionPoly]));
-    if (clipped) {
-      clipped.properties = {
-        name: "JWLA 033 - Black Sea & Sea of Azov",
-        source: "Marine Regions IHO + JWLA 033 boundary"
-      };
-      console.log("  ✅ JWLA 033 boundary applied successfully");
-      return clipped;
-    }
-    console.log("  [WARN] difference returned null, using merged");
-  } catch (e) {
-    console.log("  [WARN] JWLA boundary clip failed:", e.message);
-  }
-
-  merged.properties = { name: "JWLA 033 - Black Sea & Sea of Azov", source: "Marine Regions IHO (merged)" };
-  return merged;
+  const clipped = turf.intersect(turf.featureCollection([merged, officialWatersEnvelope]));
+  if (!clipped) throw new Error("Official JWLA Black Sea boundary produced an empty geometry");
+  clipped.properties = {
+    name: "JWLA 033 - Black Sea & Sea of Azov",
+    source: "Marine Regions IHO clipped to the official JWLA defined-water boundary",
+    sourceDocument: "JWLA-033 (3 March 2026), unchanged in JWLA-034 (29 July 2026)",
+    sourceUrl: JWLA_CURRENT_SOURCE_URL,
+    sourceSha256: JWLA_CURRENT_SOURCE_SHA256,
+    geometryStatus: "official-coordinate boundary clipped to IHO water bodies",
+    officialBoundaryCoordinates: BLACK_SEA_SOUTHERN_BOUNDARY,
+  };
+  return clipped;
 }
 
 // ─────────────────────────────────────────────
@@ -200,14 +188,33 @@ async function make12NMZone(countriesData, countryName, label, clipBbox) {
 }
 
 // ─────────────────────────────────────────────
-// Tier D: EEZ 공식 경계 (Venezuela, Guyana)
-// Marine Regions WFS에서 다운로드한 공식 EEZ 경계 사용
-// JWLA 033:
-//  - Venezuela: "all offshore installations in the Venezuelan EEZ"
-//  - Guyana: "offshore installations in the Guyanese EEZ beyond territorial waters only"
+// Tier D: EEZ context geometry (Venezuela, Guyana)
+// Marine Regions geometry is useful for locating offshore installations, but the
+// circular does not define either entire EEZ as a transit-triggered risk area.
 // ─────────────────────────────────────────────
+function withInstallationContextMetadata(feature, {
+  name,
+  mrgid,
+  officialRule,
+}) {
+  feature.properties = {
+    name,
+    source: "Marine Regions EEZ",
+    sourceDocument: "JWLA-033 (3 March 2026), unchanged in JWLA-034 (29 July 2026)",
+    sourceUrl: JWLA_CURRENT_SOURCE_URL,
+    sourceSha256: JWLA_CURRENT_SOURCE_SHA256,
+    marineRegionsMrgid: mrgid,
+    geometryRole: "installation-context-only",
+    detectionMode: "facility-visit-manual-review",
+    manualReviewRequired: true,
+    backendDetectionMismatch: true,
+    officialRule,
+    warning: "EEZ transit alone is not a definitive JWC entry event; installation-call evidence and manual review are required.",
+  };
+  return feature;
+}
 
-// Venezuela: Marine Regions 공식 EEZ (Feature mrgid:8433 "Venezuelan Exclusive Economic Zone")
+// Venezuela: Marine Regions EEZ (Feature mrgid:8433 "Venezuelan Exclusive Economic Zone")
 // 레퍼런스 기준 클리핑: 북쪽 과도한 확장(16.75°N) 및 동쪽 Essequibo 분쟁 구역(-58.82°W) 제거
 function loadVenezuelaEEZ() {
   const raw = JSON.parse(readFileSync("./eez_venezuela.geojson", "utf-8"));
@@ -222,14 +229,20 @@ function loadVenezuelaEEZ() {
   try {
     const clipped = turf.intersect(turf.featureCollection([feat, clipBox]));
     if (clipped) {
-      clipped.properties = { name: "JWLA 033 - Venezuela (Offshore EEZ)", source: "Marine Regions EEZ" };
-      return clipped;
+      return withInstallationContextMetadata(clipped, {
+        name: "JWLA 033 - Venezuela (Offshore EEZ)",
+        mrgid: 8433,
+        officialRule: "Venezuela, including all offshore installations in the Venezuelan EEZ; named-country defaults cover ports and coastal waters up to 12NM.",
+      });
     }
   } catch (e) {
     console.log("  [WARN] Venezuela EEZ clip failed:", e.message);
   }
-  feat.properties = { name: "JWLA 033 - Venezuela (Offshore EEZ)", source: "Marine Regions EEZ" };
-  return feat;
+  return withInstallationContextMetadata(feat, {
+    name: "JWLA 033 - Venezuela (Offshore EEZ)",
+    mrgid: 8433,
+    officialRule: "Venezuela, including all offshore installations in the Venezuelan EEZ; named-country defaults cover ports and coastal waters up to 12NM.",
+  });
 }
 
 // Guyana: Marine Regions 공식 EEZ + 12NM 영해 차감
@@ -247,15 +260,21 @@ async function loadGuyanaOffshoreEEZ(countriesData) {
       const territorial = turf.buffer(guyana, 22.224, { units: "kilometers", steps: 8 });
       const offshore = turf.difference(turf.featureCollection([feat, territorial]));
       if (offshore) {
-        offshore.properties = { name: "JWLA 033 - Guyana (Offshore EEZ)", source: "Marine Regions EEZ" };
-        return offshore;
+        return withInstallationContextMetadata(offshore, {
+          name: "JWLA 033 - Guyana (Offshore EEZ)",
+          mrgid: 8460,
+          officialRule: "Guyana, but only calls to offshore installations in the Guyanese EEZ beyond territorial waters.",
+        });
       }
     } catch (e) {
       console.log("  [WARN] Guyana territorial subtraction failed:", e.message);
     }
   }
-  feat.properties = { name: "JWLA 033 - Guyana (Offshore EEZ)", source: "Marine Regions EEZ" };
-  return feat;
+  return withInstallationContextMetadata(feat, {
+    name: "JWLA 033 - Guyana (Offshore EEZ)",
+    mrgid: 8460,
+    officialRule: "Guyana, but only calls to offshore installations in the Guyanese EEZ beyond territorial waters.",
+  });
 }
 
 // ─────────────────────────────────────────────
@@ -350,6 +369,37 @@ async function main() {
   } catch (e) { console.log("  [ERROR] Guyana EEZ:", e.message); }
 
   // ── Output ─────────────────────────────────────
+  const requiredNames = [
+    "JWLA 033 - Black Sea & Sea of Azov",
+    "JWLA 033 - Gulf of Guinea",
+    "JWLA 033 - Libya (Coastal 12NM)",
+    "JWLA 033 - Sudan (Red Sea Coastal)",
+    "JWLA 033 - Eritrea (S of 18N)",
+    "JWLA 033 - Djibouti (Coastal)",
+    "JWLA 033 - Somalia (Coastal)",
+    "JWLA 033 - Cabo Delgado / N.Mozambique",
+    "JWLA 033 - Nigeria (Coastal 12NM)",
+    "JWLA 033 - Benin (Coastal 12NM)",
+    "JWLA 033 - Togo (Coastal 12NM)",
+    "JWLA 033 - Venezuela (Offshore EEZ)",
+    "JWLA 033 - Guyana (Offshore EEZ)",
+  ];
+  const names = new Set(results.map((feature) => feature.properties?.name));
+  const missing = requiredNames.filter((name) => !names.has(name));
+  if (missing.length > 0 || results.length !== requiredNames.length) {
+    throw new Error(`Refusing partial global-zone output; missing=${missing.join(", ") || "none"}, count=${results.length}/${requiredNames.length}`);
+  }
+  const criticalGeometryNames = new Set([
+    "JWLA 033 - Black Sea & Sea of Azov",
+    "JWLA 033 - Venezuela (Offshore EEZ)",
+    "JWLA 033 - Guyana (Offshore EEZ)",
+  ]);
+  for (const feature of results.filter((candidate) => criticalGeometryNames.has(candidate.properties?.name))) {
+    if (!turf.booleanValid(feature)) {
+      throw new Error(`Refusing invalid global-zone geometry: ${feature.properties?.name}`);
+    }
+  }
+
   const out = JSON.stringify({ type: "FeatureCollection", features: results }, null, 0);
   const outPath = "../frontend/public/war-risk-zone-global.geojson";
   writeFileSync(outPath, out);
@@ -359,4 +409,7 @@ async function main() {
   console.log(`📁 저장: ${outPath} (${(out.length / 1024).toFixed(0)} KB)`);
 }
 
-main().catch(console.error);
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

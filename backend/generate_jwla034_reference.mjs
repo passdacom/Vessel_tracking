@@ -231,34 +231,81 @@ function buildCountries(countries) {
   }));
 }
 
-function assertValid(collection, label) {
+function buildInstallationReferences(areas) {
+  const names = new Set([
+    "JWLA 034 - Guyana Offshore Installation Reference",
+    "JWLA 034 - Venezuela Offshore Installation Reference",
+  ]);
+  const features = areas.features.filter((feature) => names.has(feature.properties?.name));
+  if (features.length !== names.size) {
+    throw new Error(`Expected ${names.size} installation reference features, found ${features.length}`);
+  }
+  return turf.featureCollection(features);
+}
+
+function assertWellFormed(collection, label) {
+  const visitPolygon = (polygon, featureName) => {
+    if (!Array.isArray(polygon) || polygon.length === 0) throw new Error(`${label} empty polygon: ${featureName}`);
+    for (const ring of polygon) {
+      if (!Array.isArray(ring) || ring.length < 4) throw new Error(`${label} short ring: ${featureName}`);
+      for (const coordinate of ring) {
+        const [lon, lat] = coordinate || [];
+        if (!Number.isFinite(lon) || !Number.isFinite(lat) || lon < -180 || lon > 180 || lat < -90 || lat > 90) {
+          throw new Error(`${label} invalid coordinate: ${featureName}`);
+        }
+      }
+      const first = ring[0];
+      const last = ring[ring.length - 1];
+      if (first[0] !== last[0] || first[1] !== last[1]) throw new Error(`${label} unclosed ring: ${featureName}`);
+    }
+  };
+
   for (const feature of collection.features) {
-    if (!turf.booleanValid(feature)) throw new Error(`${label} invalid geometry: ${feature.properties?.name}`);
+    const featureName = feature.properties?.name;
+    if (feature.geometry?.type === "Polygon") {
+      visitPolygon(feature.geometry.coordinates, featureName);
+    } else if (feature.geometry?.type === "MultiPolygon") {
+      for (const polygon of feature.geometry.coordinates) visitPolygon(polygon, featureName);
+    } else {
+      throw new Error(`${label} unsupported geometry: ${featureName}`);
+    }
   }
 }
 
 function main() {
   const countries = readJson("backend/countries.geojson");
+  console.log("Building JWLA-034 area references...");
   const areas = buildAreas(countries);
+  console.log("Building JWLA-034 amendments...");
   const amendments = buildAmendments(countries);
+  console.log("Building JWLA-034 country references...");
   const listedCountries = buildCountries(countries);
-  assertValid(areas, "areas");
-  assertValid(amendments, "amendments");
-  assertValid(listedCountries, "countries");
+  const installations = buildInstallationReferences(areas);
+  console.log("Validating JWLA-034 area reference structure...");
+  assertWellFormed(areas, "areas");
+  console.log("Validating JWLA-034 amendment structure...");
+  assertWellFormed(amendments, "amendments");
+  console.log("Validating JWLA-034 country reference structure...");
+  assertWellFormed(listedCountries, "countries");
+  console.log("Validating JWLA-034 installation reference structure...");
+  assertWellFormed(installations, "installations");
 
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, "jwla-034-reference.geojson"), JSON.stringify(areas));
   fs.writeFileSync(path.join(outDir, "jwla-034-amendments.geojson"), JSON.stringify(amendments));
   fs.writeFileSync(path.join(outDir, "jwla-034-countries.geojson"), JSON.stringify(listedCountries));
+  fs.writeFileSync(path.join(outDir, "jwla-034-installations.geojson"), JSON.stringify(installations));
   console.log(JSON.stringify({
     circular: CIRCULAR,
     areas: areas.features.length,
     amendments: amendments.features.length,
     countries: listedCountries.features.length,
+    installations: installations.features.length,
     files: [
       path.join(outDir, "jwla-034-reference.geojson"),
       path.join(outDir, "jwla-034-amendments.geojson"),
       path.join(outDir, "jwla-034-countries.geojson"),
+      path.join(outDir, "jwla-034-installations.geojson"),
     ],
   }, null, 2));
 }

@@ -717,6 +717,7 @@ function App() {
           etaDestination={etaDestination}
           etaVesselPos={etaVesselId ? positions[etaVesselId]?.[0] : null}
           onStartEta={handleStartEta}
+          onOpenZoneSettings={() => setShowZoneSettings(true)}
         />
         <ReportTable vessels={vessels.filter(v => v.active !== false)} positions={positions} />
         <GlobalTimePanel

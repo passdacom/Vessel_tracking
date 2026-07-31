@@ -19,6 +19,8 @@ Do not edit the generated GeoJSON by hand.
 
 `jwla-034-reference.geojson` preserves the complete informational JWLA-034 reconstruction. The UI intentionally renders `jwla-034-amendments.geojson` instead: the existing JWLA-033-era/backend boundaries remain the visible baseline, while only the Red Sea northward extension from 18°N to 25.5°N is overlaid as the JWLA-034 change. This avoids visually replacing unchanged areas or hiding Israel/Lebanon 12NM and other baseline boundaries.
 
+`jwla-034-installations.geojson` is a dedicated lazy-loaded subset for the Guyana and Venezuela offshore-installation context controls. It avoids downloading the full reference asset when those controls are unused and remains reference-only; it does not convert EEZ transit into an alert event.
+
 These generated files are informational reference layers. Every feature carries `contractAlertEligible: false`. They must not be connected to the backend contract geofence without a separate versioned contract-rule design and approval.
 
 ## Known limitations

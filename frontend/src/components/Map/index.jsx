@@ -5,6 +5,7 @@ import VesselTrack from "./VesselTrack.jsx";
 import RestrictedZone from "./RestrictedZone.jsx";
 import PortMarker from "./PortMarker.jsx";
 import ShippingLaneLayer from "./ShippingLaneLayer.jsx";
+import { formatMapStatus, MAP_RISK_STATUS } from "./mapStatus.js";
 
 // ── 픽셀 기반 라벨 방향 결정 ─────────────────────────────────────────────────
 const ICON_R   = 14;
@@ -106,6 +107,57 @@ function ZoomListener({ setZoom }) {
         return () => map.off('zoomend', onZoom);
     }, [map, setZoom]);
     return null;
+}
+
+function MapRiskStatusControl({ onOpenZoneSettings }) {
+    const map = useMap();
+    const [cursor, setCursor] = useState(null);
+    const [statusZoom, setStatusZoom] = useState(() => map.getZoom());
+    useMapEvents({
+        mousemove(event) {
+            setCursor(event.latlng);
+        },
+        zoomend() {
+            setStatusZoom(map.getZoom());
+        },
+    });
+
+    const stopMapEvent = (event) => event.stopPropagation();
+    return (
+        <div
+            className="absolute bottom-2 left-2 z-[800] max-w-[calc(100%_-_1rem)] rounded-lg border border-gray-700/80 bg-gray-950/90 px-2.5 py-2 text-[10px] text-gray-300 shadow-xl backdrop-blur-sm print:hidden"
+            data-testid="map-risk-status"
+            onClick={stopMapEvent}
+            onDoubleClick={stopMapEvent}
+            onMouseDown={stopMapEvent}
+            onWheel={stopMapEvent}
+        >
+            <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                    type="button"
+                    onClick={onOpenZoneSettings}
+                    className="rounded border border-red-800 bg-red-950/80 px-1.5 py-0.5 font-semibold text-red-200 hover:bg-red-900"
+                    aria-label="Risk Area 표시 설정 열기"
+                >
+                    {MAP_RISK_STATUS.referenceLabel}
+                </button>
+                <span className="rounded border border-amber-800/80 bg-amber-950/70 px-1.5 py-0.5 font-semibold text-amber-200">
+                    {MAP_RISK_STATUS.alertLabel}
+                </span>
+                <a
+                    href={MAP_RISK_STATUS.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-semibold text-sky-300 underline decoration-sky-700 underline-offset-2 hover:text-sky-200"
+                >
+                    LMA PDF
+                </a>
+            </div>
+            <div className="mt-1 font-mono text-[9px] text-gray-400" aria-live="polite">
+                {formatMapStatus(cursor, statusZoom)}
+            </div>
+        </div>
+    );
 }
 
 function PlaybackMapController({ position, follow }) {
@@ -266,6 +318,7 @@ export default function Map({
     etaDestination = null,
     etaVesselPos = null,
     onStartEta,
+    onOpenZoneSettings,
 }) {
     const [zoom, setZoom] = useState(5);
     const [labelDirections, setLabelDirections] = useState({});
@@ -288,6 +341,7 @@ export default function Map({
             <MapController selectedVesselId={selectedVesselId} panTrigger={panTrigger} vessels={vessels} positions={positions} selectedPort={selectedPort} portPanTrigger={portPanTrigger} />
             <RestrictedZone zoneSettings={zoneSettings} focusArea={focusArea} />
             <ZoomListener setZoom={setZoom} />
+            <MapRiskStatusControl onOpenZoneSettings={onOpenZoneSettings} />
             <LabelDirectionComputer
                 vessels={vessels}
                 positions={positions}
