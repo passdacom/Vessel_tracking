@@ -4,6 +4,7 @@ import { getLayerDefaults, shouldLoadSectionLayers } from "../../riskAreas/riskA
 
 const AREA_URL = "/risk-areas/jwla-034-amendments.geojson";
 const COUNTRY_URL = "/risk-areas/jwla-034-countries.geojson";
+const INSTALLATION_URL = "/risk-areas/jwla-034-installations.geojson";
 const CONTRACT_ALERT_URLS = [
   "/war-risk-zone.geojson",
   "/12nm_bounds.geojson",
@@ -51,9 +52,11 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   const map = useMap();
   const [areas, setAreas] = useState(null);
   const [countries, setCountries] = useState(null);
+  const [installations, setInstallations] = useState(null);
   const [contractAlerts, setContractAlerts] = useState(null);
   const areaRef = useRef(null);
   const countryRef = useRef(null);
+  const installationRef = useRef(null);
   const contractAlertRef = useRef(null);
 
   useEffect(() => {
@@ -72,6 +75,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   }, []);
 
   const shouldLoadCountries = shouldLoadSectionLayers("jwc-countries", zoneSettings, focusArea?.key);
+  const shouldLoadInstallations = shouldLoadSectionLayers("jwc-installations", zoneSettings, focusArea?.key);
   const shouldLoadContractAlerts = shouldLoadSectionLayers("contract-alerts", zoneSettings, focusArea?.key);
 
   useEffect(() => {
@@ -89,6 +93,22 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     loadCountries();
     return () => controller.abort();
   }, [shouldLoadCountries, countries]);
+
+  useEffect(() => {
+    if (!shouldLoadInstallations || installations) return undefined;
+    const controller = new AbortController();
+    const loadInstallations = async () => {
+      try {
+        const response = await fetch(INSTALLATION_URL, { signal: controller.signal });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        setInstallations(await response.json());
+      } catch (error) {
+        if (error.name !== "AbortError") console.error("JWLA-034 installation reference load error:", error);
+      }
+    };
+    loadInstallations();
+    return () => controller.abort();
+  }, [shouldLoadInstallations, installations]);
 
   useEffect(() => {
     if (!shouldLoadContractAlerts || contractAlerts) return undefined;
@@ -152,15 +172,16 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   useEffect(() => {
     areaRef.current?.setStyle(getStyle);
     countryRef.current?.setStyle(getStyle);
+    installationRef.current?.setStyle(getStyle);
     contractAlertRef.current?.setStyle(getStyle);
   }, [zoneSettings, getStyle]);
 
   useEffect(() => {
     if (!focusArea?.key) return;
-    const feature = featureByName([areas, countries, contractAlerts], focusArea.key);
+    const feature = featureByName([areas, countries, installations, contractAlerts], focusArea.key);
     const bounds = getBounds(feature);
     if (bounds) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 7, animate: true });
-  }, [focusArea, areas, countries, contractAlerts, map]);
+  }, [focusArea, areas, countries, installations, contractAlerts, map]);
 
   return (
     <>
@@ -178,6 +199,15 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
           ref={countryRef}
           key={`jwla034-countries-${countries.features?.length || 0}`}
           data={countries}
+          style={getStyle}
+          onEachFeature={onEachFeature}
+        />
+      )}
+      {installations && (
+        <GeoJSON
+          ref={installationRef}
+          key={`jwla034-installations-${installations.features?.length || 0}`}
+          data={installations}
           style={getStyle}
           onEachFeature={onEachFeature}
         />
