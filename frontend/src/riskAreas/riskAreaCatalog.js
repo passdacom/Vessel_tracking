@@ -64,6 +64,49 @@ const pending = (id, label, { badge, note, sourceUrl, color, dataStatus = "pendi
   ...metadata,
 });
 
+const JWC_034_CURRENT_WATERS = [
+  item({
+    id: "jwc-034-current-combined-waters",
+    label: "Middle East & Southern Red Sea defined waters",
+    layerKey: "JWLA 034 - Combined Middle East and Southern Red Sea Waters",
+    badge: "CURRENT",
+    note: "Current JWLA-034 informational reconstruction. Egyptian territorial waters use pinned approximate reference geometry.",
+    defaultVisible: true,
+    color: "#dc2626",
+    opacity: 0.15,
+  }),
+  item({
+    id: "jwc-034-current-black-sea",
+    label: "Black Sea & Sea of Azov",
+    layerKey: "JWLA 034 - Black Sea & Sea of Azov",
+    badge: "CURRENT",
+    note: "Current maritime reference boundary. The circular's Ukraine, Don, Donets and Belarus inland-water clauses remain incomplete.",
+    defaultVisible: true,
+    color: "#dc2626",
+    opacity: 0.15,
+  }),
+  item({
+    id: "jwc-034-current-gulf-guinea",
+    label: "Gulf of Guinea",
+    layerKey: "JWLA 034 - Gulf of Guinea",
+    badge: "CURRENT",
+    note: "Current anchor-based informational reconstruction; coastline closure remains approximate.",
+    defaultVisible: true,
+    color: "#dc2626",
+    opacity: 0.15,
+  }),
+  item({
+    id: "jwc-034-current-cabo-delgado",
+    label: "Cabo Delgado",
+    layerKey: "JWLA 034 - Cabo Delgado",
+    badge: "CURRENT",
+    note: "Current Tanzania and Mozambique coastline-buffer reference constrained by the circular's published limits.",
+    defaultVisible: true,
+    color: "#dc2626",
+    opacity: 0.15,
+  }),
+];
+
 const JWC_034_AMENDMENTS = [
   item({
     id: "jwc-034-red-sea-northward-extension",
@@ -71,7 +114,7 @@ const JWC_034_AMENDMENTS = [
     layerKey: "JWLA 034 Amendment - Red Sea 18N to 25.5N",
     badge: "034 NEW",
     note: "Only the area added north of the JWLA-033 18°N limit is shown. Egyptian territorial waters are excluded with approximate reference geometry.",
-    defaultVisible: true,
+    defaultVisible: false,
     color: "#facc15",
     opacity: 0.22,
     mapKind: "version-amendment",
@@ -163,7 +206,7 @@ const CONTRACT_ALERT_ITEMS = Object.entries(CONTRACT_ALERT_FILES).flatMap(([sour
     layerKey: name,
     badge: "BACKEND",
     note: `JWLA-033-era baseline from ${sourceFile}; this is also the boundary currently used by the backend geofence. Display controls do not change alert rules.`,
-    defaultVisible: true,
+    defaultVisible: false,
     color: "#ef4444",
     opacity: 0.08,
     sourceUrl: null,
@@ -271,11 +314,21 @@ const IWL_ITEMS = IWL_SPECS.map((spec) => pending(spec.id, spec.label, {
 
 export const RISK_AREA_SECTIONS = Object.freeze([
   {
+    id: "jwc-034-current",
+    regime: "JWC current reference",
+    label: "JWLA-034 Current Defined Waters",
+    countLabel: "4 defined-water designations",
+    description: "Default informational view of the current circular. Known source-data limitations are stated per area; this layer does not change backend alerts.",
+    defaultOpen: true,
+    color: "#dc2626",
+    items: JWC_034_CURRENT_WATERS,
+  },
+  {
     id: "contract-alerts",
     regime: "JWLA-033 / Backend",
     label: "JWLA-033 Baseline Areas",
     countLabel: "22 areas · backend alert basis",
-    description: "Restored JWLA-033-era map baseline. These exact boundaries are also used by the backend entry/exit checker; display controls do not change server alert rules.",
+    description: "Optional JWLA-033-era/backend comparison. These exact boundaries are used by the backend entry/exit checker; display controls do not change server alert rules.",
     defaultOpen: false,
     color: "#ef4444",
     items: CONTRACT_ALERT_ITEMS,
@@ -285,8 +338,8 @@ export const RISK_AREA_SECTIONS = Object.freeze([
     regime: "JWC version delta",
     label: "JWLA-034 Added Area",
     countLabel: "1 northward extension",
-    description: "Only the northward Red Sea expansion beyond the JWLA-033 baseline is overlaid, so old and new boundaries remain visually distinguishable.",
-    defaultOpen: true,
+    description: "Optional version-comparison overlay showing only the northward Red Sea expansion beyond the JWLA-033 baseline.",
+    defaultOpen: false,
     color: "#facc15",
     items: JWC_034_AMENDMENTS,
   },
@@ -345,6 +398,22 @@ export function getCalendarStatus(areaItem, at = new Date()) {
 
 export function allRiskAreaItems() {
   return RISK_AREA_SECTIONS.flatMap((section) => section.items);
+}
+
+export function migrateRiskAreaSettings(settings) {
+  const current = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+  if (current.__jwlaCurrentDefaultsVersion === 1) return current;
+
+  const next = { ...current, __jwlaCurrentDefaultsVersion: 1 };
+  for (const areaItem of [...CONTRACT_ALERT_ITEMS, ...JWC_034_AMENDMENTS]) {
+    for (const layerKey of areaItem.layerKeys) {
+      next[layerKey] = {
+        ...current[layerKey],
+        visible: false,
+      };
+    }
+  }
+  return next;
 }
 
 export function shouldLoadSectionLayers(sectionId, settings = {}, focusKey = null) {

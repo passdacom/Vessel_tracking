@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { GeoJSON, useMap } from "react-leaflet";
 import { getLayerDefaults, shouldLoadSectionLayers } from "../../riskAreas/riskAreaCatalog.js";
 
-const AREA_URL = "/risk-areas/jwla-034-amendments.geojson";
+const AREA_URL = "/risk-areas/jwla-034-reference.geojson";
 const COUNTRY_URL = "/risk-areas/jwla-034-countries.geojson";
 const INSTALLATION_URL = "/risk-areas/jwla-034-installations.geojson";
 const CONTRACT_ALERT_URLS = [
@@ -43,7 +43,7 @@ function featureByName(collections, name) {
 }
 
 /**
- * JWLA-033 baseline with a separate JWLA-034 amendment overlay.
+ * Current JWLA-034 informational reference with optional version/backend layers.
  *
  * These layers intentionally do not feed the backend geofence checker. The current
  * reference map and contract alert rules have different version/effective-date semantics.
@@ -65,9 +65,13 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
       try {
         const response = await fetch(AREA_URL, { signal: controller.signal });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        setAreas(await response.json());
+        const collection = await response.json();
+        setAreas({
+          ...collection,
+          features: (collection.features || []).filter((feature) => feature.properties?.scope === "defined-waters"),
+        });
       } catch (error) {
-        if (error.name !== "AbortError") console.error("JWLA-034 amendment load error:", error);
+        if (error.name !== "AbortError") console.error("JWLA-034 current reference load error:", error);
       }
     };
     loadAreas();
@@ -152,12 +156,14 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     if (!setting.visible) return { opacity: 0, fillOpacity: 0, weight: 0, interactive: false };
     const isReferenceOnly = feature.properties?.monitoringMode === "reference-only";
     const isContractAlert = feature.properties?.monitoringMode === "backend-geofence";
+    const isInstallationContext = feature.properties?.geometryRole === "installation-context-only"
+      || feature.properties?.scope === "installation-context-only";
     return {
       color: setting.color,
       weight: isContractAlert ? 2 : isReferenceOnly ? 1 : 1.5,
       opacity: Math.min(1, setting.opacity + 0.35),
       fillColor: setting.color,
-      fillOpacity: setting.opacity,
+      fillOpacity: isInstallationContext ? 0 : setting.opacity,
       dashArray: isContractAlert ? "2, 5" : isReferenceOnly ? "2, 7" : "6, 4",
       interactive: true,
     };
@@ -215,7 +221,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
       {areas && (
         <GeoJSON
           ref={areaRef}
-          key={`jwla034-amendments-${areas.features?.length || 0}`}
+          key={`jwla034-current-${areas.features?.length || 0}`}
           data={areas}
           style={getStyle}
           onEachFeature={onEachFeature}
