@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import * as turf from "@turf/turf";
 
@@ -15,9 +16,38 @@ const SOURCE_SHA256 = "125e507bbd187051315bdf80ae30583bc92ec9ad2d280d02fac2d10a0
 const GEOMETRY_SOURCE = "Marine Regions IHO/EEZ reference geometry and geo-countries/Natural Earth-derived boundaries";
 const ACCURACY_NOTE = "Reference visualization only; not for navigation or automatic determination of contract coverage.";
 const TERRITORIAL_SEA_KM = 22.224;
+const COASTAL_SOURCE = "backend/reference-data/marine-regions-territorial-seas-v4-syr-rus.geojson";
+const COASTAL_MANIFEST = "backend/reference-data/marine-regions-territorial-seas-v4-syr-rus.manifest.json";
+const REVIEWED_COASTAL_SOURCE_SHA256 = "00b007a2a76df5b7a59fc8349c0184d1f561da12c3cec5f5acf65d5f10ad4a6f";
+const HASH_SCOPE = "sourceDocumentSha256 hashes raw official circular PDF bytes; sourceArtifactSha256 hashes raw pinned geometry artifact bytes when present";
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
+}
+
+function loadVerifiedCoastalSource() {
+  const sourceBytes = fs.readFileSync(path.join(root, COASTAL_SOURCE));
+  const manifest = readJson(COASTAL_MANIFEST);
+  const digest = createHash("sha256").update(sourceBytes).digest("hex");
+  if (digest !== REVIEWED_COASTAL_SOURCE_SHA256) {
+    throw new Error(`Pinned coastal source hash does not match reviewed trust anchor: ${digest}`);
+  }
+  if (digest !== manifest.artifactSha256) {
+    throw new Error(`Pinned coastal source hash does not match manifest: ${digest}`);
+  }
+  const source = JSON.parse(sourceBytes);
+  if (source.type !== "FeatureCollection" || source.features?.length !== manifest.features?.length) {
+    throw new Error("Pinned coastal source does not match manifest feature count");
+  }
+  const observed = source.features.map((feature) => ({
+    mrgid: feature.properties?.mrgid,
+    iso3: feature.properties?.iso_ter1,
+    geoname: feature.properties?.geoname,
+  }));
+  if (JSON.stringify(observed) !== JSON.stringify(manifest.features)) {
+    throw new Error("Pinned coastal source feature metadata does not match manifest");
+  }
+  return { source, manifest };
 }
 
 function firstFeature(relativePath) {
@@ -76,6 +106,10 @@ function withMetadata(feature, name, extra = {}) {
       publishedAt: PUBLISHED_AT,
       sourceUrl: SOURCE_URL,
       sourceSha256: SOURCE_SHA256,
+      hashAlgorithm: "SHA-256",
+      hashScope: HASH_SCOPE,
+      sourceDocumentSha256: SOURCE_SHA256,
+      sourceArtifactSha256: null,
       geometrySource: GEOMETRY_SOURCE,
       accuracyNote: ACCURACY_NOTE,
       ...properties,
@@ -175,6 +209,37 @@ function copyArea(source, sourceName, targetName, extra = {}) {
   });
 }
 
+function buildCoastalReferences(coastal) {
+  const labels = new Map([
+    [49096, "Syria"],
+    [49031, "Russia"],
+  ]);
+  return coastal.source.features.map((feature) => {
+    const mrgid = feature.properties.mrgid;
+    const iso3 = feature.properties.iso_ter1;
+    const countryName = labels.get(mrgid);
+    if (!countryName) throw new Error(`Unexpected coastal feature MRGID: ${mrgid}`);
+    return withMetadata(feature, `JWLA 034 Coastal Waters - ${countryName} 12NM`, {
+      stableId: `jwla-034:coastal:${iso3}:12nm`,
+      scope: "named-country-coastal-waters",
+      officialCategory: "Named Country coastal waters",
+      monitoringMode: "reference-only",
+      geometryStatus: "reference-only",
+      marineRegionsMrgid: mrgid,
+      sourceDatasetVersion: coastal.manifest.version,
+      sourceUrl: coastal.manifest.wfsEndpoint,
+      sourceSha256: coastal.manifest.artifactSha256,
+      sourceArtifactSha256: REVIEWED_COASTAL_SOURCE_SHA256,
+      geometrySource: `${coastal.manifest.dataset} ${coastal.manifest.version}`,
+      license: coastal.manifest.license,
+      licenseUrl: coastal.manifest.licenseUrl,
+      attribution: "Marine Regions / Flanders Marine Institute (VLIZ)",
+      subsetStatus: "reviewed-subset",
+      derivedStatus: "derived-display-reference",
+    });
+  });
+}
+
 function buildAreas(countries) {
   const global = readJson("frontend/public/war-risk-zone-global.geojson");
   return turf.featureCollection([
@@ -207,7 +272,7 @@ const LISTED_COUNTRIES = [
   "Russia",
   "Bahrain", "Iran", "Iraq", "Israel", "Kuwait", "Lebanon", "Oman", "Qatar", "Saudi Arabia", "Syria", "United Arab Emirates", "Yemen",
   "Djibouti", "Eritrea", "Libya", "Somalia", "Sudan", "Benin", "Nigeria", "Togo",
-  "Guyana", "Venezuela",
+  "Venezuela",
 ];
 
 function buildCountries(countries) {
@@ -272,10 +337,229 @@ function assertWellFormed(collection, label) {
   }
 }
 
+const TRANSACTION_JOURNAL_NAME = ".jwla-034-generation-transaction.json";
+const OUTPUT_NAMES = [
+  "jwla-034-reference.geojson",
+  "jwla-034-coastal-waters.geojson",
+  "jwla-034-amendments.geojson",
+  "jwla-034-countries.geojson",
+  "jwla-034-installations.geojson",
+];
+
+function fsyncDirectory(directory) {
+  const fd = fs.openSync(directory, "r");
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function writeAndFsync(filePath, bytes) {
+  const fd = fs.openSync(filePath, "wx", 0o644);
+  try {
+    fs.writeFileSync(fd, bytes);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function writeJournalAtomically(journal, token) {
+  const journalPath = path.join(outDir, TRANSACTION_JOURNAL_NAME);
+  const temporaryPath = path.join(outDir, `${TRANSACTION_JOURNAL_NAME}.tmp-${token}-${randomUUID()}`);
+  try {
+    writeAndFsync(temporaryPath, Buffer.from(JSON.stringify(journal)));
+    fs.renameSync(temporaryPath, journalPath);
+    fsyncDirectory(outDir);
+  } finally {
+    if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+  }
+}
+
+function validateJournal(value) {
+  const fail = () => { throw new Error("Invalid JWLA-034 transaction journal"); };
+  if (!value || value.version !== 1 || !["prepared", "rolled-back", "committed"].includes(value.phase)) fail();
+  if (typeof value.token !== "string" || !/^[0-9]+-[0-9a-f-]{36}$/.test(value.token)) fail();
+  if (!Array.isArray(value.entries) || value.entries.length !== OUTPUT_NAMES.length) fail();
+  const observedNames = new Set();
+  const entries = value.entries.map((entry) => {
+    if (!entry || typeof entry.name !== "string" || !OUTPUT_NAMES.includes(entry.name) || observedNames.has(entry.name)) fail();
+    observedNames.add(entry.name);
+    const expected = {
+      finalName: entry.name,
+      stageName: `${entry.name}.stage-${value.token}`,
+      backupName: `${entry.name}.backup-${value.token}`,
+      restoreName: `${entry.name}.restore-${value.token}`,
+    };
+    if (typeof entry.existed !== "boolean") fail();
+    for (const [key, expectedName] of Object.entries(expected)) {
+      if (entry[key] !== expectedName || path.basename(entry[key]) !== entry[key]) fail();
+    }
+    return {
+      ...entry,
+      finalPath: path.join(outDir, entry.finalName),
+      stagePath: path.join(outDir, entry.stageName),
+      backupPath: path.join(outDir, entry.backupName),
+      restorePath: path.join(outDir, entry.restoreName),
+    };
+  });
+  if (OUTPUT_NAMES.some((name) => !observedNames.has(name))) fail();
+  return { ...value, entries };
+}
+
+function removeIfPresent(filePath) {
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+}
+
+function recoverExistingTransaction() {
+  fs.mkdirSync(outDir, { recursive: true });
+  const journalPath = path.join(outDir, TRANSACTION_JOURNAL_NAME);
+  if (!fs.existsSync(journalPath)) return;
+
+  let journal;
+  try {
+    journal = validateJournal(JSON.parse(fs.readFileSync(journalPath, "utf8")));
+  } catch (error) {
+    throw new Error("Cannot recover malformed JWLA-034 transaction journal; outputs were not touched", { cause: error });
+  }
+
+  if (journal.phase === "prepared") {
+    for (const entry of journal.entries) {
+      if (entry.existed && !fs.existsSync(entry.backupPath)) {
+        throw new Error(`Cannot recover JWLA-034 transaction: missing backup for ${entry.name}`);
+      }
+    }
+    for (const entry of journal.entries) {
+      if (entry.existed) {
+        removeIfPresent(entry.restorePath);
+        fs.copyFileSync(entry.backupPath, entry.restorePath, fs.constants.COPYFILE_EXCL);
+        const restoreFd = fs.openSync(entry.restorePath, "r");
+        try { fs.fsyncSync(restoreFd); } finally { fs.closeSync(restoreFd); }
+        fs.renameSync(entry.restorePath, entry.finalPath);
+      } else {
+        removeIfPresent(entry.finalPath);
+      }
+    }
+    fsyncDirectory(outDir);
+    // Recovery is now durable. Mark it before deleting backups so a crash during
+    // cleanup is re-entrant and never requires an already-removed backup.
+    writeJournalAtomically({
+      version: journal.version,
+      phase: "rolled-back",
+      token: journal.token,
+      entries: journal.entries.map(({ name, finalName, stageName, backupName, restoreName, existed }) => ({
+        name, finalName, stageName, backupName, restoreName, existed,
+      })),
+    }, journal.token);
+    journal.phase = "rolled-back";
+  }
+
+  const injectedCleanupAfter = process.env.NODE_ENV === "test"
+    ? Number.parseInt(process.env.JWLA034_TEST_SIGKILL_AFTER_RECOVERY_CLEANUPS || "", 10)
+    : Number.NaN;
+  let cleanupCount = 0;
+  for (const entry of journal.entries) {
+    removeIfPresent(entry.stagePath);
+    removeIfPresent(entry.backupPath);
+    removeIfPresent(entry.restorePath);
+    cleanupCount += 1;
+    fsyncDirectory(outDir);
+    if (Number.isInteger(injectedCleanupAfter) && injectedCleanupAfter > 0 && cleanupCount === injectedCleanupAfter) {
+      process.kill(process.pid, "SIGKILL");
+    }
+  }
+  fsyncDirectory(outDir);
+  fs.unlinkSync(journalPath);
+  fsyncDirectory(outDir);
+}
+
+function publishOutputsTransactionally(outputs) {
+  fs.mkdirSync(outDir, { recursive: true });
+  const token = `${process.pid}-${randomUUID()}`;
+  const entries = outputs.map(([name, collection]) => {
+    const finalName = name;
+    return {
+      name,
+      finalName,
+      stageName: `${name}.stage-${token}`,
+      backupName: `${name}.backup-${token}`,
+      restoreName: `${name}.restore-${token}`,
+      finalPath: path.join(outDir, finalName),
+      stagePath: path.join(outDir, `${name}.stage-${token}`),
+      backupPath: path.join(outDir, `${name}.backup-${token}`),
+      restorePath: path.join(outDir, `${name}.restore-${token}`),
+      existed: fs.existsSync(path.join(outDir, finalName)),
+      bytes: Buffer.from(JSON.stringify(collection)),
+    };
+  });
+  const journalEntries = entries.map(({ name, finalName, stageName, backupName, restoreName, existed }) => ({
+    name, finalName, stageName, backupName, restoreName, existed,
+  }));
+  const injectedAfter = process.env.NODE_ENV === "test"
+    ? Number.parseInt(process.env.JWLA034_TEST_SIGKILL_AFTER_REPLACEMENTS || "", 10)
+    : Number.NaN;
+  let journalPrepared = false;
+
+  try {
+    for (const entry of entries) writeAndFsync(entry.stagePath, entry.bytes);
+    for (const entry of entries) {
+      if (!entry.existed) continue;
+      fs.copyFileSync(entry.finalPath, entry.backupPath, fs.constants.COPYFILE_EXCL);
+      const backupFd = fs.openSync(entry.backupPath, "r");
+      try { fs.fsyncSync(backupFd); } finally { fs.closeSync(backupFd); }
+    }
+    fsyncDirectory(outDir);
+    writeJournalAtomically({ version: 1, phase: "prepared", token, entries: journalEntries }, token);
+    journalPrepared = true;
+
+    let replacementCount = 0;
+    for (const entry of entries) {
+      fs.renameSync(entry.stagePath, entry.finalPath);
+      replacementCount += 1;
+      fsyncDirectory(outDir);
+      if (Number.isInteger(injectedAfter) && injectedAfter > 0 && replacementCount === injectedAfter) {
+        process.kill(process.pid, "SIGKILL");
+      }
+    }
+    fsyncDirectory(outDir);
+    writeJournalAtomically({ version: 1, phase: "committed", token, entries: journalEntries }, token);
+
+    for (const entry of entries) {
+      removeIfPresent(entry.stagePath);
+      removeIfPresent(entry.backupPath);
+      removeIfPresent(entry.restorePath);
+    }
+    fsyncDirectory(outDir);
+    fs.unlinkSync(path.join(outDir, TRANSACTION_JOURNAL_NAME));
+    fsyncDirectory(outDir);
+  } catch (error) {
+    if (journalPrepared || fs.existsSync(path.join(outDir, TRANSACTION_JOURNAL_NAME))) {
+      try {
+        recoverExistingTransaction();
+      } catch (recoveryError) {
+        throw new AggregateError([error, recoveryError], "JWLA-034 publication failed and durable recovery was incomplete");
+      }
+    } else {
+      for (const entry of entries) {
+        removeIfPresent(entry.stagePath);
+        removeIfPresent(entry.backupPath);
+        removeIfPresent(entry.restorePath);
+      }
+      fsyncDirectory(outDir);
+    }
+    throw error;
+  }
+}
+
 function main() {
+  recoverExistingTransaction();
+  // Verify every pinned input before constructing or replacing any generated output.
+  const coastal = loadVerifiedCoastalSource();
   const countries = readJson("backend/countries.geojson");
   console.log("Building JWLA-034 area references...");
   const areas = buildAreas(countries);
+  const coastalWaters = turf.featureCollection(buildCoastalReferences(coastal));
   console.log("Building JWLA-034 amendments...");
   const amendments = buildAmendments(countries);
   console.log("Building JWLA-034 country references...");
@@ -283,6 +567,8 @@ function main() {
   const installations = buildInstallationReferences(areas);
   console.log("Validating JWLA-034 area reference structure...");
   assertWellFormed(areas, "areas");
+  console.log("Validating JWLA-034 coastal reference structure...");
+  assertWellFormed(coastalWaters, "coastal waters");
   console.log("Validating JWLA-034 amendment structure...");
   assertWellFormed(amendments, "amendments");
   console.log("Validating JWLA-034 country reference structure...");
@@ -290,23 +576,22 @@ function main() {
   console.log("Validating JWLA-034 installation reference structure...");
   assertWellFormed(installations, "installations");
 
-  fs.mkdirSync(outDir, { recursive: true });
-  fs.writeFileSync(path.join(outDir, "jwla-034-reference.geojson"), JSON.stringify(areas));
-  fs.writeFileSync(path.join(outDir, "jwla-034-amendments.geojson"), JSON.stringify(amendments));
-  fs.writeFileSync(path.join(outDir, "jwla-034-countries.geojson"), JSON.stringify(listedCountries));
-  fs.writeFileSync(path.join(outDir, "jwla-034-installations.geojson"), JSON.stringify(installations));
+  const outputs = [
+    ["jwla-034-reference.geojson", areas],
+    ["jwla-034-coastal-waters.geojson", coastalWaters],
+    ["jwla-034-amendments.geojson", amendments],
+    ["jwla-034-countries.geojson", listedCountries],
+    ["jwla-034-installations.geojson", installations],
+  ];
+  publishOutputsTransactionally(outputs);
   console.log(JSON.stringify({
     circular: CIRCULAR,
     areas: areas.features.length,
+    coastalWaters: coastalWaters.features.length,
     amendments: amendments.features.length,
     countries: listedCountries.features.length,
     installations: installations.features.length,
-    files: [
-      path.join(outDir, "jwla-034-reference.geojson"),
-      path.join(outDir, "jwla-034-amendments.geojson"),
-      path.join(outDir, "jwla-034-countries.geojson"),
-      path.join(outDir, "jwla-034-installations.geojson"),
-    ],
+    files: outputs.map(([name]) => path.join(outDir, name)),
   }, null, 2));
 }
 

@@ -12,6 +12,7 @@ const JWC_SOURCE = JWLA_REFERENCE.sourceUrl;
 const IBF_SOURCE = "https://www.itfseafarers.org/en/resources/ibf-warlike-and-high-risk-areas";
 const ITF_SOURCE = "https://www.itfseafarers.org/en/resources/itf-warlike-and-high-risk-areas-0";
 const IWL_SOURCE = "https://jwla.ai/api/docs/IWL-1.7.76-CL26.pdf";
+const COASTAL_URL = "/risk-areas/jwla-034-coastal-waters.geojson";
 
 const item = ({
   id,
@@ -105,6 +106,26 @@ const JWC_034_CURRENT_WATERS = [
     color: "#dc2626",
     opacity: 0.15,
   }),
+  item({
+    id: "jwc-034-coastal-syria",
+    label: "Syria 12NM coastal waters",
+    layerKey: "JWLA 034 Coastal Waters - Syria 12NM",
+    badge: "HIGH-DETAIL",
+    note: "Verified high-detail optional reference from Marine Regions Territorial Seas v4; display-only and not connected to backend contract alerts.",
+    defaultVisible: false,
+    color: "#dc2626",
+    opacity: 0.1,
+  }),
+  item({
+    id: "jwc-034-coastal-russia",
+    label: "Russia 12NM coastal waters",
+    layerKey: "JWLA 034 Coastal Waters - Russia 12NM",
+    badge: "HIGH-DETAIL",
+    note: "Verified high-detail optional reference from Marine Regions Territorial Seas v4; display-only and not connected to backend contract alerts.",
+    defaultVisible: false,
+    color: "#dc2626",
+    opacity: 0.1,
+  }),
 ];
 
 const JWC_034_AMENDMENTS = [
@@ -164,7 +185,6 @@ const JWC_COUNTRIES = [
   country("benin", "Benin", "Africa"),
   country("nigeria", "Nigeria", "Africa"),
   country("togo", "Togo", "Africa"),
-  country("guyana", "Guyana", "South America"),
   country("venezuela", "Venezuela", "South America"),
 ];
 
@@ -317,7 +337,7 @@ export const RISK_AREA_SECTIONS = Object.freeze([
     id: "jwc-034-current",
     regime: "JWC current reference",
     label: "JWLA-034 Current Defined Waters",
-    countLabel: "4 defined-water designations",
+    countLabel: "4 defined waters · 2 verified coastal references",
     description: "Default informational view of the current circular. Known source-data limitations are stated per area; this layer does not change backend alerts.",
     defaultOpen: true,
     color: "#dc2626",
@@ -413,6 +433,95 @@ export function shouldLoadSectionLayers(sectionId, settings = {}, focusKey = nul
     areaItem.layerKeys?.includes(focusKey)
     || areaItem.layerKeys?.some((key) => settings[key]?.visible ?? areaItem.defaultVisible)
   ));
+}
+
+export function shouldLoadCoastalLayers(settings = {}, focusKey = null) {
+  const coastalItems = JWC_034_CURRENT_WATERS.filter((areaItem) => areaItem.id.startsWith("jwc-034-coastal-"));
+  return coastalItems.some((areaItem) => (
+    areaItem.layerKeys.includes(focusKey)
+    || areaItem.layerKeys.some((key) => settings[key]?.visible ?? areaItem.defaultVisible)
+  ));
+}
+
+export function planCoastalLoadRequest({ settings = {}, focusKey = null, loaded = false } = {}) {
+  const shouldLoad = shouldLoadCoastalLayers(settings, focusKey);
+  const shouldRequest = shouldLoad && !loaded;
+  return { shouldLoad, shouldRequest, urls: shouldRequest ? [COASTAL_URL] : [] };
+}
+
+export function getFeatureBounds(feature) {
+  const longitudes = [];
+  let ordinaryWest = Infinity;
+  let ordinaryEast = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  const visit = (value) => {
+    if (!Array.isArray(value)) return;
+    if (value.length >= 2 && Number.isFinite(value[0]) && Number.isFinite(value[1])) {
+      longitudes.push(((value[0] % 360) + 360) % 360);
+      ordinaryWest = Math.min(ordinaryWest, value[0]);
+      ordinaryEast = Math.max(ordinaryEast, value[0]);
+      minLat = Math.min(minLat, value[1]);
+      maxLat = Math.max(maxLat, value[1]);
+      return;
+    }
+    value.forEach(visit);
+  };
+  visit(feature?.geometry?.coordinates);
+  if (longitudes.length === 0 || !Number.isFinite(minLat) || !Number.isFinite(maxLat)) return null;
+  if (ordinaryEast - ordinaryWest <= 180) return [[minLat, ordinaryWest], [maxLat, ordinaryEast]];
+
+  const sorted = [...new Set(longitudes)].sort((a, b) => a - b);
+  let largestGap = -1;
+  let arcStartIndex = 0;
+  for (let index = 0; index < sorted.length; index += 1) {
+    const next = index === sorted.length - 1 ? sorted[0] + 360 : sorted[index + 1];
+    const gap = next - sorted[index];
+    if (gap > largestGap) {
+      largestGap = gap;
+      arcStartIndex = (index + 1) % sorted.length;
+    }
+  }
+  let west = sorted[arcStartIndex];
+  let east = sorted[(arcStartIndex - 1 + sorted.length) % sorted.length];
+  if (east < west || sorted.length === 1) east += 360;
+  while (west > 180) { west -= 360; east -= 360; }
+  return [[minLat, west], [maxLat, east]];
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(value);
+    return ["https:", "http:"].includes(url.protocol) ? escapeHtml(url.href) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildFeaturePopupContent(feature) {
+  const properties = feature?.properties || {};
+  const sourceUrl = safeExternalUrl(properties.sourceUrl);
+  const licenseUrl = safeExternalUrl(properties.licenseUrl);
+  const provenance = [properties.subsetStatus, properties.derivedStatus].filter(Boolean).map(escapeHtml).join(" · ");
+  return [
+    '<section role="region" aria-label="Risk area source and license">',
+    `<strong>${escapeHtml(properties.name || "Risk area")}</strong>`,
+    `<div>${escapeHtml(properties.geometryStatus || "reference")}</div>`,
+    properties.attribution ? `<div>Attribution: ${escapeHtml(properties.attribution)}</div>` : "",
+    sourceUrl ? `<div>Source: <a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">source data</a></div>` : "",
+    licenseUrl ? `<div>License: <a href="${licenseUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(properties.license || "license")}</a></div>` : "",
+    provenance ? `<div>${provenance}</div>` : "",
+    "</section>",
+  ].join("");
 }
 
 export function isItemVisible(settings, areaItem) {
