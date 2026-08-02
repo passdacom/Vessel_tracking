@@ -5,6 +5,7 @@ import {
   getFeatureBounds,
   getLayerDefaults,
   planCoastalLoadRequest,
+  planProvisionalCoastalLoadRequest,
   shouldLoadSectionLayers,
 } from "../../riskAreas/riskAreaCatalog.js";
 
@@ -39,12 +40,14 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   const map = useMap();
   const [areas, setAreas] = useState(null);
   const [coastal, setCoastal] = useState(null);
+  const [provisionalCoastal, setProvisionalCoastal] = useState(null);
   const [amendments, setAmendments] = useState(null);
   const [countries, setCountries] = useState(null);
   const [installations, setInstallations] = useState(null);
   const [contractAlerts, setContractAlerts] = useState(null);
   const areaRef = useRef(null);
   const coastalRef = useRef(null);
+  const provisionalCoastalRef = useRef(null);
   const amendmentRef = useRef(null);
   const countryRef = useRef(null);
   const installationRef = useRef(null);
@@ -76,6 +79,12 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     loaded: Boolean(coastal),
   });
   const coastalRequestUrl = coastalLoadPlan.urls[0];
+  const provisionalCoastalLoadPlan = planProvisionalCoastalLoadRequest({
+    settings: zoneSettings,
+    focusKey: focusArea?.key,
+    loaded: Boolean(provisionalCoastal),
+  });
+  const provisionalCoastalRequestUrl = provisionalCoastalLoadPlan.urls[0];
   const shouldLoadAmendments = shouldLoadSectionLayers("jwc-034-amendment", zoneSettings, focusArea?.key);
   const shouldLoadInstallations = shouldLoadSectionLayers("jwc-installations", zoneSettings, focusArea?.key);
   const shouldLoadContractAlerts = shouldLoadSectionLayers("contract-alerts", zoneSettings, focusArea?.key);
@@ -95,6 +104,22 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     loadCoastal();
     return () => controller.abort();
   }, [coastalLoadPlan.shouldRequest, coastalRequestUrl]);
+
+  useEffect(() => {
+    if (!provisionalCoastalLoadPlan.shouldRequest || !provisionalCoastalRequestUrl) return undefined;
+    const controller = new AbortController();
+    const loadProvisionalCoastal = async () => {
+      try {
+        const response = await fetch(provisionalCoastalRequestUrl, { signal: controller.signal });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        setProvisionalCoastal(await response.json());
+      } catch (error) {
+        if (error.name !== "AbortError") console.error("JWLA-034 provisional coastal reference load error:", error);
+      }
+    };
+    loadProvisionalCoastal();
+    return () => controller.abort();
+  }, [provisionalCoastalLoadPlan.shouldRequest, provisionalCoastalRequestUrl]);
 
   useEffect(() => {
     if (!shouldLoadAmendments || amendments) return undefined;
@@ -211,6 +236,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   useEffect(() => {
     areaRef.current?.setStyle(getStyle);
     coastalRef.current?.setStyle(getStyle);
+    provisionalCoastalRef.current?.setStyle(getStyle);
     amendmentRef.current?.setStyle(getStyle);
     countryRef.current?.setStyle(getStyle);
     installationRef.current?.setStyle(getStyle);
@@ -219,10 +245,10 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
 
   useEffect(() => {
     if (!focusArea?.key) return;
-    const feature = featureByName([areas, coastal, amendments, countries, installations, contractAlerts], focusArea.key);
+    const feature = featureByName([areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts], focusArea.key);
     const bounds = getFeatureBounds(feature);
     if (bounds) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 7, animate: true });
-  }, [focusArea, areas, coastal, amendments, countries, installations, contractAlerts, map]);
+  }, [focusArea, areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts, map]);
 
   return (
     <>
@@ -267,6 +293,15 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
           ref={coastalRef}
           key={`jwla034-coastal-${coastal.features?.length || 0}`}
           data={coastal}
+          style={getStyle}
+          onEachFeature={onEachFeature}
+        />
+      )}
+      {provisionalCoastal && (
+        <GeoJSON
+          ref={provisionalCoastalRef}
+          key={`jwla034-provisional-coastal-${provisionalCoastal.features?.length || 0}`}
+          data={provisionalCoastal}
           style={getStyle}
           onEachFeature={onEachFeature}
         />

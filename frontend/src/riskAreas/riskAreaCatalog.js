@@ -13,6 +13,7 @@ const IBF_SOURCE = "https://www.itfseafarers.org/en/resources/ibf-warlike-and-hi
 const ITF_SOURCE = "https://www.itfseafarers.org/en/resources/itf-warlike-and-high-risk-areas-0";
 const IWL_SOURCE = "https://jwla.ai/api/docs/IWL-1.7.76-CL26.pdf";
 const COASTAL_URL = "/risk-areas/jwla-034-coastal-waters.geojson";
+const PROVISIONAL_COASTAL_URL = "/risk-areas/jwla-034-coastal-waters-provisional.geojson";
 
 const item = ({
   id,
@@ -127,6 +128,54 @@ const JWC_034_CURRENT_WATERS = [
     opacity: 0.1,
   }),
 ];
+
+const PROVISIONAL_COASTAL_SPECS = [
+  ["bahrain", "Bahrain"],
+  ["iran", "Iran"],
+  ["iraq", "Iraq"],
+  ["kuwait", "Kuwait"],
+  ["oman", "Oman"],
+  ["qatar", "Qatar"],
+  ["saudi-arabia", "Saudi Arabia"],
+  ["uae", "United Arab Emirates"],
+  ["yemen", "Yemen"],
+  ["djibouti", "Djibouti"],
+  ["eritrea", "Eritrea"],
+  ["libya", "Libya"],
+  ["somalia", "Somalia"],
+  ["sudan", "Sudan"],
+  ["benin", "Benin"],
+  ["nigeria", "Nigeria"],
+  ["togo", "Togo"],
+  ["venezuela", "Venezuela"],
+];
+
+export const JWC_034_PROVISIONAL_COASTAL = Object.freeze([
+  ...PROVISIONAL_COASTAL_SPECS.map(([id, label]) => item({
+    id: `jwc-034-coastal-${id}`,
+    label: `${label} 12NM coastal waters`,
+    layerKey: `JWLA 034 Coastal Waters - ${label} 12NM`,
+    badge: "PROVISIONAL",
+    note: "Provisional display-only coastal reference; manual review is required and this layer is not connected to backend contract alerts.",
+    defaultVisible: false,
+    color: "#f97316",
+    opacity: 0.1,
+  })),
+  pending("jwc-034-coastal-israel", "Israel 12NM coastal waters", {
+    badge: "WITHHELD",
+    note: "Source geometry is withheld from display because validation failed; manual review is required.",
+    sourceUrl: JWC_SOURCE,
+    color: "#f97316",
+    dataStatus: "manual-review",
+  }),
+  pending("jwc-034-coastal-lebanon", "Lebanon 12NM coastal waters", {
+    badge: "WITHHELD",
+    note: "Source geometry is withheld from display because validation failed; manual review is required.",
+    sourceUrl: JWC_SOURCE,
+    color: "#f97316",
+    dataStatus: "manual-review",
+  }),
+]);
 
 const JWC_034_AMENDMENTS = [
   item({
@@ -344,6 +393,16 @@ export const RISK_AREA_SECTIONS = Object.freeze([
     items: JWC_034_CURRENT_WATERS,
   },
   {
+    id: "jwc-034-provisional-coastal",
+    regime: "JWC provisional reference",
+    label: "JWLA-034 Provisional Coastal References",
+    countLabel: "18 provisional · 2 withheld for manual review",
+    description: "Optional display-only Marine Regions references. All require manual review and do not change backend alerts; Israel and Lebanon remain withheld.",
+    defaultOpen: false,
+    color: "#f97316",
+    items: JWC_034_PROVISIONAL_COASTAL,
+  },
+  {
     id: "contract-alerts",
     regime: "JWLA-033 / Backend",
     label: "JWLA-033 Baseline Areas",
@@ -449,6 +508,12 @@ export function planCoastalLoadRequest({ settings = {}, focusKey = null, loaded 
   return { shouldLoad, shouldRequest, urls: shouldRequest ? [COASTAL_URL] : [] };
 }
 
+export function planProvisionalCoastalLoadRequest({ settings = {}, focusKey = null, loaded = false } = {}) {
+  const shouldLoad = shouldLoadSectionLayers("jwc-034-provisional-coastal", settings, focusKey);
+  const shouldRequest = shouldLoad && !loaded;
+  return { shouldLoad, shouldRequest, urls: shouldRequest ? [PROVISIONAL_COASTAL_URL] : [] };
+}
+
 export function getFeatureBounds(feature) {
   const longitudes = [];
   let ordinaryWest = Infinity;
@@ -520,6 +585,8 @@ export function buildFeaturePopupContent(feature) {
     sourceUrl ? `<div>Source: <a href="${sourceUrl}" target="_blank" rel="noopener noreferrer">source data</a></div>` : "",
     licenseUrl ? `<div>License: <a href="${licenseUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(properties.license || "license")}</a></div>` : "",
     provenance ? `<div>${provenance}</div>` : "",
+    properties.manualReviewRequired ? "<div><strong>Manual review required before use.</strong></div>" : "",
+    properties.contractAlertEligible === false ? "<div>Display only; not used for backend contract alerts.</div>" : "",
     "</section>",
   ].join("");
 }

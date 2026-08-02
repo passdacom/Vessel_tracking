@@ -19,6 +19,40 @@ const TERRITORIAL_SEA_KM = 22.224;
 const COASTAL_SOURCE = "backend/reference-data/marine-regions-territorial-seas-v4-syr-rus.geojson";
 const COASTAL_MANIFEST = "backend/reference-data/marine-regions-territorial-seas-v4-syr-rus.manifest.json";
 const REVIEWED_COASTAL_SOURCE_SHA256 = "00b007a2a76df5b7a59fc8349c0184d1f561da12c3cec5f5acf65d5f10ad4a6f";
+const PROVISIONAL_COASTAL_SOURCE = "backend/reference-data/marine-regions-territorial-seas-v4-jwla034-remaining.geojson";
+const PROVISIONAL_COASTAL_MANIFEST = "backend/reference-data/marine-regions-territorial-seas-v4-jwla034-remaining.manifest.json";
+const PROVISIONAL_COASTAL_SOURCE_SHA256 = "055c17d26b7aa7814708d3d73b7110571349303a93a5bc12d9475da31fdcdbdd";
+const MARINE_REGIONS_PROVENANCE = Object.freeze({
+  dataset: "World 12 Nautical Miles Zone (Territorial Seas)",
+  version: "v4",
+  publishedAt: "2023-10-25",
+  doi: "https://doi.org/10.14284/633",
+  license: "CC BY 4.0",
+  licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+  sourceUrl: "https://www.marineregions.org/downloads.php",
+  wfsEndpoint: "https://geo.vliz.be/geoserver/MarineRegions/ows",
+  retrievalScript: "backend/scripts/fetch-marine-regions-territorial-seas.mjs --provisional",
+});
+const PROVISIONAL_FEATURES = [
+  [49081, "BHR", "Bahraini 12 NM"], [49183, "IRN", "Iranian 12 NM"],
+  [49184, "IRQ", "Iraqi 12 NM"], [49098, "ISR", "Israeli 12 NM"],
+  [49080, "KWT", "Kuwaiti 12 NM"], [49097, "LBN", "Lebanese 12 NM"],
+  [49077, "OMN", "Omani 12 NM"], [49182, "QAT", "Qatari 12 NM"],
+  [49079, "SAU", "Saudi Arabian 12 NM"], [49083, "ARE", "Emirati 12 NM"],
+  [49076, "YEM", "Yemeni 12 NM"], [49075, "DJI", "Djiboutian 12 NM"],
+  [49074, "ERI", "Eritrean 12 NM"], [49095, "LBY", "Libyan 12 NM"],
+  [49073, "SOM", "Somali 12 NM"], [49078, "SDN", "Sudanese 12 NM"],
+  [49113, "BEN", "Beninese 12 NM"], [49188, "NGA", "Nigerian 12 NM"],
+  [49112, "TGO", "Togolese 12 NM"], [49150, "VEN", "Venezuelan 12 NM"],
+];
+const PROVISIONAL_RENDERED_MRGIDS = [
+  49081, 49183, 49184, 49080, 49077, 49182, 49079, 49083, 49076,
+  49075, 49074, 49095, 49073, 49078, 49113, 49188, 49112, 49150,
+];
+const PROVISIONAL_WITHHELD = [
+  [49098, "ISR", "Israeli 12 NM", "source geometry fails turf.booleanValid; manual review required"],
+  [49097, "LBN", "Lebanese 12 NM", "source geometry fails turf.booleanValid; manual review required"],
+];
 const HASH_SCOPE = "sourceDocumentSha256 hashes raw official circular PDF bytes; sourceArtifactSha256 hashes raw pinned geometry artifact bytes when present";
 
 function readJson(relativePath) {
@@ -47,6 +81,47 @@ function loadVerifiedCoastalSource() {
   if (JSON.stringify(observed) !== JSON.stringify(manifest.features)) {
     throw new Error("Pinned coastal source feature metadata does not match manifest");
   }
+  return { source, manifest };
+}
+
+function loadProvisionalCoastalSource() {
+  const sourceBytes = fs.readFileSync(path.join(root, PROVISIONAL_COASTAL_SOURCE));
+  const digest = createHash("sha256").update(sourceBytes).digest("hex");
+  if (digest !== PROVISIONAL_COASTAL_SOURCE_SHA256) {
+    throw new Error(`Pinned provisional coastal source hash does not match trust anchor: ${digest}`);
+  }
+  const manifest = readJson(PROVISIONAL_COASTAL_MANIFEST);
+  if (manifest.artifactSha256 !== digest || manifest.reviewStatus !== "provisional-display-only"
+      || Object.entries(MARINE_REGIONS_PROVENANCE).some(([key, value]) => manifest[key] !== value)) {
+    throw new Error("Pinned provisional coastal manifest provenance does not match generator contract");
+  }
+  const expectedFeatures = PROVISIONAL_FEATURES.map(([mrgid, iso3, geoname]) => ({ mrgid, iso3, geoname }));
+  if (JSON.stringify(manifest.features) !== JSON.stringify(expectedFeatures)
+      || JSON.stringify(manifest.renderedMrgids) !== JSON.stringify(PROVISIONAL_RENDERED_MRGIDS)) {
+    throw new Error("Pinned provisional coastal manifest feature order or render policy is unexpected");
+  }
+  const expectedWithheld = PROVISIONAL_WITHHELD.map(([mrgid, iso3, geoname, reason]) => ({ mrgid, iso3, geoname, reason }));
+  if (JSON.stringify(manifest.withheldFeatures) !== JSON.stringify(expectedWithheld)) {
+    throw new Error("Pinned provisional coastal manifest withheld policy is unexpected");
+  }
+  const source = JSON.parse(sourceBytes);
+  const observed = source.features?.map((feature) => [
+    feature.properties?.mrgid, feature.properties?.iso_ter1, feature.properties?.geoname,
+  ]);
+  if (source.type !== "FeatureCollection" || JSON.stringify(observed) !== JSON.stringify(PROVISIONAL_FEATURES)) {
+    throw new Error("Pinned provisional coastal source metadata or order is unexpected");
+  }
+  const rendered = new Set(PROVISIONAL_RENDERED_MRGIDS);
+  const withheld = new Set(PROVISIONAL_WITHHELD.map(([mrgid]) => mrgid));
+  for (const feature of source.features) {
+    const mrgid = feature.properties.mrgid;
+    if ((rendered.has(mrgid) && withheld.has(mrgid)) || (!rendered.has(mrgid) && !withheld.has(mrgid))) {
+      throw new Error(`Provisional coastal render policy mismatch for MRGID ${mrgid}`);
+    }
+  }
+  // The exact artifact hash is the runtime trust boundary. Expensive topology validation
+  // is exercised once in the generator contract suite, not on every deterministic build
+  // or crash-recovery probe; assertWellFormed still enforces coordinate/ring structure.
   return { source, manifest };
 }
 
@@ -240,6 +315,45 @@ function buildCoastalReferences(coastal) {
   });
 }
 
+function buildProvisionalCoastalReferences(coastal) {
+  const labels = new Map([
+    [49081, "Bahrain"], [49183, "Iran"], [49184, "Iraq"], [49080, "Kuwait"],
+    [49077, "Oman"], [49182, "Qatar"], [49079, "Saudi Arabia"], [49083, "United Arab Emirates"],
+    [49076, "Yemen"], [49075, "Djibouti"], [49074, "Eritrea"], [49095, "Libya"],
+    [49073, "Somalia"], [49078, "Sudan"], [49113, "Benin"], [49188, "Nigeria"],
+    [49112, "Togo"], [49150, "Venezuela"],
+  ]);
+  const byMrgid = new Map(coastal.source.features.map((feature) => [feature.properties.mrgid, feature]));
+  return PROVISIONAL_RENDERED_MRGIDS.map((mrgid) => {
+    const feature = byMrgid.get(mrgid);
+    const countryName = labels.get(mrgid);
+    if (!feature || !countryName) {
+      throw new Error(`Cannot render provisional coastal feature MRGID ${mrgid}`);
+    }
+    const iso3 = feature.properties.iso_ter1;
+    return withMetadata(feature, `JWLA 034 Coastal Waters - ${countryName} 12NM`, {
+      stableId: `jwla-034:coastal:${iso3}:12nm`,
+      scope: "named-country-coastal-waters",
+      officialCategory: "Named Country coastal waters",
+      monitoringMode: "reference-only",
+      geometryStatus: "provisional-reference-only",
+      marineRegionsMrgid: mrgid,
+      sourceDatasetVersion: coastal.manifest.version,
+      sourceUrl: coastal.manifest.wfsEndpoint,
+      sourceSha256: coastal.manifest.artifactSha256,
+      sourceArtifactSha256: PROVISIONAL_COASTAL_SOURCE_SHA256,
+      geometrySource: `${coastal.manifest.dataset} ${coastal.manifest.version}`,
+      doi: coastal.manifest.doi,
+      license: coastal.manifest.license,
+      licenseUrl: coastal.manifest.licenseUrl,
+      attribution: "Marine Regions / Flanders Marine Institute (VLIZ)",
+      subsetStatus: "provisional-unreviewed-subset",
+      derivedStatus: "provisional-display-reference",
+      manualReviewRequired: true,
+    });
+  });
+}
+
 function buildAreas(countries) {
   const global = readJson("frontend/public/war-risk-zone-global.geojson");
   return turf.featureCollection([
@@ -344,7 +458,10 @@ const OUTPUT_NAMES = [
   "jwla-034-amendments.geojson",
   "jwla-034-countries.geojson",
   "jwla-034-installations.geojson",
+  "jwla-034-coastal-waters-provisional.geojson",
 ];
+const LEGACY_V1_OUTPUT_NAMES = OUTPUT_NAMES.filter((name) => name !== "jwla-034-coastal-waters-provisional.geojson");
+const JOURNAL_VERSION = 2;
 
 function fsyncDirectory(directory) {
   const fd = fs.openSync(directory, "r");
@@ -379,12 +496,13 @@ function writeJournalAtomically(journal, token) {
 
 function validateJournal(value) {
   const fail = () => { throw new Error("Invalid JWLA-034 transaction journal"); };
-  if (!value || value.version !== 1 || !["prepared", "rolled-back", "committed"].includes(value.phase)) fail();
+  if (!value || ![1, JOURNAL_VERSION].includes(value.version) || !["prepared", "rolled-back", "committed"].includes(value.phase)) fail();
   if (typeof value.token !== "string" || !/^[0-9]+-[0-9a-f-]{36}$/.test(value.token)) fail();
-  if (!Array.isArray(value.entries) || value.entries.length !== OUTPUT_NAMES.length) fail();
+  const expectedOutputNames = value.version === 1 ? LEGACY_V1_OUTPUT_NAMES : OUTPUT_NAMES;
+  if (!Array.isArray(value.entries) || value.entries.length !== expectedOutputNames.length) fail();
   const observedNames = new Set();
   const entries = value.entries.map((entry) => {
-    if (!entry || typeof entry.name !== "string" || !OUTPUT_NAMES.includes(entry.name) || observedNames.has(entry.name)) fail();
+    if (!entry || typeof entry.name !== "string" || !expectedOutputNames.includes(entry.name) || observedNames.has(entry.name)) fail();
     observedNames.add(entry.name);
     const expected = {
       finalName: entry.name,
@@ -404,7 +522,7 @@ function validateJournal(value) {
       restorePath: path.join(outDir, entry.restoreName),
     };
   });
-  if (OUTPUT_NAMES.some((name) => !observedNames.has(name))) fail();
+  if (expectedOutputNames.some((name) => !observedNames.has(name))) fail();
   return { ...value, entries };
 }
 
@@ -510,7 +628,7 @@ function publishOutputsTransactionally(outputs) {
       try { fs.fsyncSync(backupFd); } finally { fs.closeSync(backupFd); }
     }
     fsyncDirectory(outDir);
-    writeJournalAtomically({ version: 1, phase: "prepared", token, entries: journalEntries }, token);
+    writeJournalAtomically({ version: JOURNAL_VERSION, phase: "prepared", token, entries: journalEntries }, token);
     journalPrepared = true;
 
     let replacementCount = 0;
@@ -523,7 +641,7 @@ function publishOutputsTransactionally(outputs) {
       }
     }
     fsyncDirectory(outDir);
-    writeJournalAtomically({ version: 1, phase: "committed", token, entries: journalEntries }, token);
+    writeJournalAtomically({ version: JOURNAL_VERSION, phase: "committed", token, entries: journalEntries }, token);
 
     for (const entry of entries) {
       removeIfPresent(entry.stagePath);
@@ -556,10 +674,12 @@ function main() {
   recoverExistingTransaction();
   // Verify every pinned input before constructing or replacing any generated output.
   const coastal = loadVerifiedCoastalSource();
+  const provisionalCoastal = loadProvisionalCoastalSource();
   const countries = readJson("backend/countries.geojson");
   console.log("Building JWLA-034 area references...");
   const areas = buildAreas(countries);
   const coastalWaters = turf.featureCollection(buildCoastalReferences(coastal));
+  const provisionalCoastalWaters = turf.featureCollection(buildProvisionalCoastalReferences(provisionalCoastal));
   console.log("Building JWLA-034 amendments...");
   const amendments = buildAmendments(countries);
   console.log("Building JWLA-034 country references...");
@@ -569,6 +689,8 @@ function main() {
   assertWellFormed(areas, "areas");
   console.log("Validating JWLA-034 coastal reference structure...");
   assertWellFormed(coastalWaters, "coastal waters");
+  console.log("Validating JWLA-034 provisional coastal reference structure...");
+  assertWellFormed(provisionalCoastalWaters, "provisional coastal waters");
   console.log("Validating JWLA-034 amendment structure...");
   assertWellFormed(amendments, "amendments");
   console.log("Validating JWLA-034 country reference structure...");
@@ -582,6 +704,7 @@ function main() {
     ["jwla-034-amendments.geojson", amendments],
     ["jwla-034-countries.geojson", listedCountries],
     ["jwla-034-installations.geojson", installations],
+    ["jwla-034-coastal-waters-provisional.geojson", provisionalCoastalWaters],
   ];
   publishOutputsTransactionally(outputs);
   console.log(JSON.stringify({
@@ -591,6 +714,7 @@ function main() {
     amendments: amendments.features.length,
     countries: listedCountries.features.length,
     installations: installations.features.length,
+    provisionalCoastalWaters: provisionalCoastalWaters.features.length,
     files: outputs.map(([name]) => path.join(outDir, name)),
   }, null, 2));
 }

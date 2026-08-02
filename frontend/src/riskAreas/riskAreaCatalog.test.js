@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import * as turf from "@turf/turf";
 import * as riskAreaCatalog from "./riskAreaCatalog.js";
@@ -89,7 +90,7 @@ test("map keeps coastal data in a separate lazy reference, style ref, and focus 
   assert.match(restrictedSource, /planCoastalLoadRequest/);
   assert.match(restrictedSource, /coastalLoadPlan\.shouldRequest/);
   assert.match(restrictedSource, /coastalRef\.current\?\.setStyle\(getStyle\)/);
-  assert.match(restrictedSource, /\[areas, coastal, amendments, countries, installations, contractAlerts\]/);
+  assert.match(restrictedSource, /\[areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts\]/);
   assert.match(restrictedSource, /jwla-034-amendments\.geojson/);
   assert.match(restrictedSource, /shouldLoadSectionLayers\("jwc-034-amendment"/);
   assert.match(restrictedSource, /CURRENT_REFERENCE_SCOPES/);
@@ -135,6 +136,113 @@ test("coastal load planner excludes its URL at startup and requests it exactly o
   });
 });
 
+test("provisional coastal catalog is a separate default-off section with exact ready and withheld items", () => {
+  const section = bySection("jwc-034-provisional-coastal");
+  assert.ok(section);
+  assert.equal(section.label, "JWLA-034 Provisional Coastal References");
+  assert.equal(section.countLabel, "18 provisional · 2 withheld for manual review");
+  assert.equal(section.defaultOpen, false);
+
+  const expected = [
+    ["jwc-034-coastal-bahrain", "JWLA 034 Coastal Waters - Bahrain 12NM"],
+    ["jwc-034-coastal-iran", "JWLA 034 Coastal Waters - Iran 12NM"],
+    ["jwc-034-coastal-iraq", "JWLA 034 Coastal Waters - Iraq 12NM"],
+    ["jwc-034-coastal-kuwait", "JWLA 034 Coastal Waters - Kuwait 12NM"],
+    ["jwc-034-coastal-oman", "JWLA 034 Coastal Waters - Oman 12NM"],
+    ["jwc-034-coastal-qatar", "JWLA 034 Coastal Waters - Qatar 12NM"],
+    ["jwc-034-coastal-saudi-arabia", "JWLA 034 Coastal Waters - Saudi Arabia 12NM"],
+    ["jwc-034-coastal-uae", "JWLA 034 Coastal Waters - United Arab Emirates 12NM"],
+    ["jwc-034-coastal-yemen", "JWLA 034 Coastal Waters - Yemen 12NM"],
+    ["jwc-034-coastal-djibouti", "JWLA 034 Coastal Waters - Djibouti 12NM"],
+    ["jwc-034-coastal-eritrea", "JWLA 034 Coastal Waters - Eritrea 12NM"],
+    ["jwc-034-coastal-libya", "JWLA 034 Coastal Waters - Libya 12NM"],
+    ["jwc-034-coastal-somalia", "JWLA 034 Coastal Waters - Somalia 12NM"],
+    ["jwc-034-coastal-sudan", "JWLA 034 Coastal Waters - Sudan 12NM"],
+    ["jwc-034-coastal-benin", "JWLA 034 Coastal Waters - Benin 12NM"],
+    ["jwc-034-coastal-nigeria", "JWLA 034 Coastal Waters - Nigeria 12NM"],
+    ["jwc-034-coastal-togo", "JWLA 034 Coastal Waters - Togo 12NM"],
+    ["jwc-034-coastal-venezuela", "JWLA 034 Coastal Waters - Venezuela 12NM"],
+  ];
+  const ready = section.items.filter((areaItem) => areaItem.dataStatus === "ready");
+  assert.deepEqual(ready.map((areaItem) => [areaItem.id, areaItem.layerKeys[0]]), expected);
+  assert.ok(ready.every((areaItem) => areaItem.defaultVisible === false));
+  assert.ok(ready.every((areaItem) => areaItem.badge === "PROVISIONAL"));
+  assert.ok(ready.every((areaItem) => /display-only.*manual review/i.test(areaItem.note)));
+
+  const withheld = section.items.filter((areaItem) => areaItem.dataStatus === "manual-review");
+  assert.deepEqual(withheld.map((areaItem) => areaItem.id), ["jwc-034-coastal-israel", "jwc-034-coastal-lebanon"]);
+  assert.ok(withheld.every((areaItem) => areaItem.layerKeys.length === 0));
+  assert.ok(withheld.every((areaItem) => areaItem.defaultVisible === false));
+  for (const areaItem of withheld) {
+    const settings = {};
+    assert.equal(applyItemVisibility(settings, areaItem, true), settings);
+    assert.equal(isItemVisible(settings, areaItem), false);
+  }
+  assert.equal(shouldLoadSectionLayers(section.id, {}, null), false);
+});
+
+test("provisional output has exact stable IDs and display-only metadata aligned with the catalog", () => {
+  const output = readGeoJSON("jwla-034-coastal-waters-provisional.geojson");
+  const section = bySection("jwc-034-provisional-coastal");
+  const readyKeys = section.items.filter((areaItem) => areaItem.dataStatus === "ready").map((areaItem) => areaItem.layerKeys[0]);
+  assert.deepEqual(output.features.map((feature) => feature.id), [
+    "jwla-034:coastal:BHR:12nm", "jwla-034:coastal:IRN:12nm", "jwla-034:coastal:IRQ:12nm",
+    "jwla-034:coastal:KWT:12nm", "jwla-034:coastal:OMN:12nm", "jwla-034:coastal:QAT:12nm",
+    "jwla-034:coastal:SAU:12nm", "jwla-034:coastal:ARE:12nm", "jwla-034:coastal:YEM:12nm",
+    "jwla-034:coastal:DJI:12nm", "jwla-034:coastal:ERI:12nm", "jwla-034:coastal:LBY:12nm",
+    "jwla-034:coastal:SOM:12nm", "jwla-034:coastal:SDN:12nm", "jwla-034:coastal:BEN:12nm",
+    "jwla-034:coastal:NGA:12nm", "jwla-034:coastal:TGO:12nm", "jwla-034:coastal:VEN:12nm",
+  ]);
+  assert.deepEqual(output.features.map((feature) => feature.properties?.marineRegionsMrgid), [
+    49081, 49183, 49184, 49080, 49077, 49182, 49079, 49083, 49076,
+    49075, 49074, 49095, 49073, 49078, 49113, 49188, 49112, 49150,
+  ]);
+  assert.deepEqual(output.features.map((feature) => feature.properties?.name), readyKeys);
+  assert.ok(output.features.every((feature) => feature.properties?.scope === "named-country-coastal-waters"));
+  assert.ok(output.features.every((feature) => feature.properties?.geometryStatus === "provisional-reference-only"));
+  assert.ok(output.features.every((feature) => feature.properties?.monitoringMode === "reference-only"));
+  assert.ok(output.features.every((feature) => feature.properties?.subsetStatus === "provisional-unreviewed-subset"));
+  assert.ok(output.features.every((feature) => feature.properties?.derivedStatus === "provisional-display-reference"));
+  assert.ok(output.features.every((feature) => feature.properties?.sourceArtifactSha256 === "055c17d26b7aa7814708d3d73b7110571349303a93a5bc12d9475da31fdcdbdd"));
+  assert.ok(output.features.every((feature) => feature.properties?.manualReviewRequired === true));
+  assert.ok(output.features.every((feature) => feature.properties?.contractAlertEligible === false));
+  assert.ok(!output.features.some((feature) => ["ISR", "LBN"].includes(feature.id.split(":")[2])));
+});
+
+test("provisional planner requests only its URL once for ready visibility or focus and stays isolated", () => {
+  assert.equal(typeof riskAreaCatalog.planProvisionalCoastalLoadRequest, "function");
+  const url = "/risk-areas/jwla-034-coastal-waters-provisional.geojson";
+  const section = bySection("jwc-034-provisional-coastal");
+  const bahrain = section.items[0];
+  const israel = section.items.find((areaItem) => areaItem.id === "jwc-034-coastal-israel");
+  const syria = bySection("jwc-034-current").items[4];
+  const plan = riskAreaCatalog.planProvisionalCoastalLoadRequest;
+  assert.deepEqual(plan({}), { shouldLoad: false, shouldRequest: false, urls: [] });
+  assert.deepEqual(plan({ settings: { [bahrain.layerKeys[0]]: { visible: false, color: "#fff", opacity: 0.4 } } }), {
+    shouldLoad: false, shouldRequest: false, urls: [],
+  });
+  assert.deepEqual(plan({ settings: { [bahrain.layerKeys[0]]: { visible: true } } }), {
+    shouldLoad: true, shouldRequest: true, urls: [url],
+  });
+  assert.deepEqual(plan({ focusKey: bahrain.layerKeys[0] }), { shouldLoad: true, shouldRequest: true, urls: [url] });
+  assert.deepEqual(plan({ focusKey: bahrain.layerKeys[0], loaded: true }), { shouldLoad: true, shouldRequest: false, urls: [] });
+  assert.deepEqual(plan({ focusKey: israel.layerKeys[0] }), { shouldLoad: false, shouldRequest: false, urls: [] });
+  assert.deepEqual(plan({ focusKey: syria.layerKeys[0] }), { shouldLoad: false, shouldRequest: false, urls: [] });
+  assert.deepEqual(planCoastalLoadRequest({ focusKey: bahrain.layerKeys[0] }), { shouldLoad: false, shouldRequest: false, urls: [] });
+  assert.deepEqual(planCoastalLoadRequest({ focusKey: syria.layerKeys[0] }).urls, ["/risk-areas/jwla-034-coastal-waters.geojson"]);
+});
+
+test("RestrictedZone consumes the provisional planner with separate state, style, focus and popup paths", () => {
+  const source = fs.readFileSync(new URL("../components/Map/RestrictedZone.jsx", import.meta.url), "utf8");
+  assert.match(source, /provisionalCoastalRequestUrl = provisionalCoastalLoadPlan\.urls\[0\]/);
+  assert.match(source, /planProvisionalCoastalLoadRequest/);
+  assert.match(source, /provisionalCoastalLoadPlan\.shouldRequest/);
+  assert.match(source, /provisionalCoastalRef\.current\?\.setStyle\(getStyle\)/);
+  assert.match(source, /\[areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts\]/);
+  assert.match(source, /data=\{provisionalCoastal\}/);
+  assert.match(source, /onEachFeature=\{onEachFeature\}/);
+});
+
 test("feature bounds exclude the antimeridian gap while preserving ordinary Syria bounds", () => {
   const coastal = readGeoJSON("jwla-034-coastal-waters.geojson");
   const syria = featureByName(coastal, "JWLA 034 Coastal Waters - Syria 12NM");
@@ -161,6 +269,8 @@ test("feature popup exposes accessible Marine Regions source attribution and lic
       licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
       subsetStatus: "reviewed-subset",
       derivedStatus: "derived-display-reference",
+      manualReviewRequired: true,
+      contractAlertEligible: false,
     },
   });
   assert.match(content, /role="region"/);
@@ -169,6 +279,8 @@ test("feature popup exposes accessible Marine Regions source attribution and lic
   assert.match(content, /href="https:\/\/geo\.vliz\.be/);
   assert.match(content, /href="https:\/\/creativecommons\.org\/licenses\/by\/4\.0\/"/);
   assert.match(content, /reviewed-subset.*derived-display-reference/);
+  assert.match(content, /Manual review required/);
+  assert.match(content, /not used for backend contract alerts/);
 
   const hostile = riskAreaCatalog.buildFeaturePopupContent({
     properties: {
@@ -303,6 +415,19 @@ test("hidden country reference data loads only when a country is shown or focuse
   const focusedSettings = applyItemVisibility({}, country, true);
   assert.equal(isItemVisible(focusedSettings, country), true);
   assert.equal(shouldLoadSectionLayers("jwc-countries", focusedSettings, null), true);
+});
+
+test("backend contract alert inputs remain byte-identical", () => {
+  const expected = new Map([
+    ["../../../backend/src/services/geofenceChecker.js", "753ba3d74b44e63a08064c97ef7228621bcbf0a31bb04906d150259dcdb09d83"],
+    ["../../public/war-risk-zone.geojson", "a8ed1684db314eb1161957aa14f18c6129036ff47bf10a53ee619046fe89e56c"],
+    ["../../public/12nm_bounds.geojson", "0a70346fac027f6bf4bb53e68a55e32c9d931b99389e7afd990e0fe6768a0f3b"],
+    ["../../public/war-risk-zone-global.geojson", "58a9dedb2fac16a6008208468fba76924f3db52fc0eb022044b62425938ab94d"],
+  ]);
+  for (const [path, digest] of expected) {
+    const bytes = fs.readFileSync(new URL(path, import.meta.url));
+    assert.equal(crypto.createHash("sha256").update(bytes).digest("hex"), digest, path);
+  }
 });
 
 test("legacy contract-alert catalog stays aligned with the backend geofence inputs", () => {
