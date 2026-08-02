@@ -18,6 +18,7 @@ Do not edit the generated GeoJSON by hand.
 - Geometry inputs: checked-in Marine Regions IHO/EEZ reference data and geo-countries/Natural Earth-derived boundaries.
 - Verified coastal input: Marine Regions `World 12 Nautical Miles Zone (Territorial Seas)` v4 (published `2023-10-25`, CC BY 4.0), pinned as `backend/reference-data/marine-regions-territorial-seas-v4-syr-rus.geojson`. Its manifest `artifactSha256` is `00b007a2a76df5b7a59fc8349c0184d1f561da12c3cec5f5acf65d5f10ad4a6f`, computed over the exact raw GeoJSON artifact bytes (not parsed or normalized JSON).
 - Provisional coastal input: a separate 20-candidate pin at `backend/reference-data/marine-regions-territorial-seas-v4-jwla034-remaining.geojson`, with raw-byte SHA-256 `055c17d26b7aa7814708d3d73b7110571349303a93a5bc12d9475da31fdcdbdd`. The generated display asset contains 18 valid features; every one remains provisional, default-off, display-only, and subject to manual review.
+- Precision-reference input: pinned Natural Earth v5.1.2 ocean and admin-0 subsets. Natural Earth is [public domain](https://www.naturalearthdata.com/about/terms-of-use/); its generalized cartographic coastline is not a legal or navigational boundary.
 
 The generator is offline and deterministic: it only reads checked-in inputs. To refresh the reviewed Syria/Russia subset separately, run `node backend/scripts/fetch-marine-regions-territorial-seas.mjs`. The retrieval helper skips the network when the pinned artifact already matches its reviewed digest, retries transient retrieval failures at most three times, and refuses to replace the pin when downloaded bytes do not match that digest.
 
@@ -25,7 +26,19 @@ The generator is offline and deterministic: it only reads checked-in inputs. To 
 
 `jwla-034-installations.geojson` is a dedicated lazy-loaded subset for the Guyana and Venezuela offshore-installation context controls. It avoids downloading the full reference asset when those controls are unused, remains reference-only and is rendered without area fill; it does not convert EEZ transit into an alert event.
 
+`jwla-034-precision-references.geojson` contains three independent, default-off display references and has its own lazy loader. It is not requested at startup, for appearance-only changes, or when coastal reference sections are used. The unresolved inland-water catalog row has no layer key and cannot toggle, focus, or fetch this asset.
+
 These generated files are informational reference layers. Every feature carries `contractAlertEligible: false`. They must not be connected to the backend contract geofence without a separate versioned contract-rule design and approval.
+
+## Precision reference derivation recipes
+
+Run `python3 backend/scripts/derive-jwla034-precision-references.py` for an offline reproduction from the pinned subset, or add `--refresh-sources` to retrieve and digest-check the exact upstream Natural Earth v5.1.2 sources first. The main generator then publishes the verified candidate to the frontend asset.
+
+1. **Black Sea and Sea of Azov marine waters:** form the positive inclusion envelope from the nine official JWLA anchors, close it landward outside the regional mask, and intersect it with the pinned Natural Earth Black Sea/Sea of Azov ocean subset. This recipe intentionally adds no inland-water geometry.
+2. **Gulf of Guinea water only:** form the positive inclusion envelope from the three official Gulf of Guinea anchors, close it landward outside the regional mask, and intersect it with the pinned Natural Earth Gulf of Guinea ocean subset.
+3. **Iran Caspian 12NM provisional:** project the Natural Earth Iran admin-0 geometry and Caspian ocean mask to a local azimuthal equidistant CRS, buffer Iran by 22,224 m, subtract Iran, intersect the result with the Caspian mask, then transform it back to EPSG:4326.
+
+All three recipes produce cartographic, non-authoritative display references that require manual review. They are not for navigation, automatic contract decisions, or backend alerts.
 
 ## Known limitations
 
@@ -34,4 +47,6 @@ These generated files are informational reference layers. Every feature carries 
 - Guyana and Venezuela EEZ shapes provide offshore-installation context only; simple EEZ transit is not a JWC entry event.
 - Named-country coastal geometry is split by review status: Syria/Russia are verified, 18 references are provisional/manual-review display layers, and Israel/Lebanon are withheld because their source geometry is invalid.
 - The provisional Iran feature reflects only the geometry present in the pinned Marine Regions candidate. It does not establish complete JWLA-034 treatment of Iran's Caspian coast or inland/Caspian waters; that scope remains a manual-review limitation.
+- Ukraine, Crimea/other Ukrainian territories under Russian control, the Don and Donets reaches, and Belarus south of 52°30′N inland waters are unresolved. No toggleable or focusable geometry is supplied for them.
+- Offshore facility calls remain a separate facility-event/manual review problem; area references cannot establish that a vessel called at a covered installation.
 - The data is not for navigation or automatic coverage determination.

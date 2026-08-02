@@ -16,6 +16,11 @@ const expectedCoastalSha256 = "00b007a2a76df5b7a59fc8349c0184d1f561da12c3cec5f5a
 const provisionalSourceName = "marine-regions-territorial-seas-v4-jwla034-remaining.geojson";
 const provisionalManifestName = "marine-regions-territorial-seas-v4-jwla034-remaining.manifest.json";
 const expectedProvisionalSha256 = "055c17d26b7aa7814708d3d73b7110571349303a93a5bc12d9475da31fdcdbdd";
+const precisionInputNames = [
+  "jwla-034-precision-references.source.geojson",
+  "jwla-034-precision-references.manifest.json",
+  "natural-earth-v5.1.2-jwla034-precision-subsets.geojson",
+];
 const provisionalSpecs = [
   { mrgid: 49081, iso3: "BHR", geoname: "Bahraini 12 NM" },
   { mrgid: 49183, iso3: "IRN", geoname: "Iranian 12 NM" },
@@ -49,8 +54,9 @@ const outputNames = [
   "jwla-034-countries.geojson",
   "jwla-034-installations.geojson",
   "jwla-034-coastal-waters-provisional.geojson",
+  "jwla-034-precision-references.geojson",
 ];
-const legacyV1OutputNames = outputNames.filter((name) => name !== "jwla-034-coastal-waters-provisional.geojson");
+const legacyV1OutputNames = outputNames.slice(0, 5);
 const transactionJournalName = ".jwla-034-generation-transaction.json";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
@@ -141,7 +147,7 @@ test("JWLA-034 generator fails closed without replacing outputs when pinned coas
     for (const name of ["war-risk-zone.geojson", "war-risk-zone-global.geojson"]) {
       fs.copyFileSync(path.join(rootDir, "frontend", "public", name), path.join(tempPublic, name));
     }
-    for (const name of [coastalSourceName, coastalManifestName, provisionalSourceName, provisionalManifestName]) {
+    for (const name of [coastalSourceName, coastalManifestName, provisionalSourceName, provisionalManifestName, ...precisionInputNames]) {
       fs.copyFileSync(path.join(backendDir, "reference-data", name), path.join(tempReferenceData, name));
     }
     fs.symlinkSync(path.join(backendDir, "node_modules"), path.join(tempBackend, "node_modules"), "dir");
@@ -175,7 +181,7 @@ function copyGeneratorFixture(tempRoot) {
   fs.copyFileSync(path.join(backendDir, "generate_jwla034_reference.mjs"), path.join(tempBackend, "generate_jwla034_reference.mjs"));
   for (const name of ["countries.geojson", "iho_red_sea.geojson"]) fs.copyFileSync(path.join(backendDir, name), path.join(tempBackend, name));
   for (const name of ["war-risk-zone.geojson", "war-risk-zone-global.geojson"]) fs.copyFileSync(path.join(rootDir, "frontend", "public", name), path.join(tempPublic, name));
-  for (const name of [coastalSourceName, coastalManifestName, provisionalSourceName, provisionalManifestName]) fs.copyFileSync(path.join(backendDir, "reference-data", name), path.join(tempReferenceData, name));
+  for (const name of [coastalSourceName, coastalManifestName, provisionalSourceName, provisionalManifestName, ...precisionInputNames]) fs.copyFileSync(path.join(backendDir, "reference-data", name), path.join(tempReferenceData, name));
   fs.symlinkSync(path.join(backendDir, "node_modules"), path.join(tempBackend, "node_modules"), "dir");
   return { tempBackend, tempOutput };
 }

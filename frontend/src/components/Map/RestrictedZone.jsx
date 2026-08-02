@@ -5,6 +5,7 @@ import {
   getFeatureBounds,
   getLayerDefaults,
   planCoastalLoadRequest,
+  planPrecisionReferenceLoadRequest,
   planProvisionalCoastalLoadRequest,
   shouldLoadSectionLayers,
 } from "../../riskAreas/riskAreaCatalog.js";
@@ -41,6 +42,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   const [areas, setAreas] = useState(null);
   const [coastal, setCoastal] = useState(null);
   const [provisionalCoastal, setProvisionalCoastal] = useState(null);
+  const [precisionReferences, setPrecisionReferences] = useState(null);
   const [amendments, setAmendments] = useState(null);
   const [countries, setCountries] = useState(null);
   const [installations, setInstallations] = useState(null);
@@ -48,6 +50,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   const areaRef = useRef(null);
   const coastalRef = useRef(null);
   const provisionalCoastalRef = useRef(null);
+  const precisionRef = useRef(null);
   const amendmentRef = useRef(null);
   const countryRef = useRef(null);
   const installationRef = useRef(null);
@@ -85,6 +88,12 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     loaded: Boolean(provisionalCoastal),
   });
   const provisionalCoastalRequestUrl = provisionalCoastalLoadPlan.urls[0];
+  const precisionLoadPlan = planPrecisionReferenceLoadRequest({
+    settings: zoneSettings,
+    focusKey: focusArea?.key,
+    loaded: Boolean(precisionReferences),
+  });
+  const precisionRequestUrl = precisionLoadPlan.urls[0];
   const shouldLoadAmendments = shouldLoadSectionLayers("jwc-034-amendment", zoneSettings, focusArea?.key);
   const shouldLoadInstallations = shouldLoadSectionLayers("jwc-installations", zoneSettings, focusArea?.key);
   const shouldLoadContractAlerts = shouldLoadSectionLayers("contract-alerts", zoneSettings, focusArea?.key);
@@ -120,6 +129,22 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     loadProvisionalCoastal();
     return () => controller.abort();
   }, [provisionalCoastalLoadPlan.shouldRequest, provisionalCoastalRequestUrl]);
+
+  useEffect(() => {
+    if (!precisionLoadPlan.shouldRequest || !precisionRequestUrl) return undefined;
+    const controller = new AbortController();
+    const loadPrecisionReferences = async () => {
+      try {
+        const response = await fetch(precisionRequestUrl, { signal: controller.signal });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        setPrecisionReferences(await response.json());
+      } catch (error) {
+        if (error.name !== "AbortError") console.error("JWLA-034 precision reference load error:", error);
+      }
+    };
+    loadPrecisionReferences();
+    return () => controller.abort();
+  }, [precisionLoadPlan.shouldRequest, precisionRequestUrl]);
 
   useEffect(() => {
     if (!shouldLoadAmendments || amendments) return undefined;
@@ -237,6 +262,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     areaRef.current?.setStyle(getStyle);
     coastalRef.current?.setStyle(getStyle);
     provisionalCoastalRef.current?.setStyle(getStyle);
+    precisionRef.current?.setStyle(getStyle);
     amendmentRef.current?.setStyle(getStyle);
     countryRef.current?.setStyle(getStyle);
     installationRef.current?.setStyle(getStyle);
@@ -245,10 +271,10 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
 
   useEffect(() => {
     if (!focusArea?.key) return;
-    const feature = featureByName([areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts], focusArea.key);
+    const feature = featureByName([areas, coastal, provisionalCoastal, precisionReferences, amendments, countries, installations, contractAlerts], focusArea.key);
     const bounds = getFeatureBounds(feature);
     if (bounds) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 7, animate: true });
-  }, [focusArea, areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts, map]);
+  }, [focusArea, areas, coastal, provisionalCoastal, precisionReferences, amendments, countries, installations, contractAlerts, map]);
 
   return (
     <>
@@ -302,6 +328,15 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
           ref={provisionalCoastalRef}
           key={`jwla034-provisional-coastal-${provisionalCoastal.features?.length || 0}`}
           data={provisionalCoastal}
+          style={getStyle}
+          onEachFeature={onEachFeature}
+        />
+      )}
+      {precisionReferences && (
+        <GeoJSON
+          ref={precisionRef}
+          key={`jwla034-precision-${precisionReferences.features?.length || 0}`}
+          data={precisionReferences}
           style={getStyle}
           onEachFeature={onEachFeature}
         />

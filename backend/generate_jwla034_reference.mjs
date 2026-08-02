@@ -22,6 +22,30 @@ const REVIEWED_COASTAL_SOURCE_SHA256 = "00b007a2a76df5b7a59fc8349c0184d1f561da12
 const PROVISIONAL_COASTAL_SOURCE = "backend/reference-data/marine-regions-territorial-seas-v4-jwla034-remaining.geojson";
 const PROVISIONAL_COASTAL_MANIFEST = "backend/reference-data/marine-regions-territorial-seas-v4-jwla034-remaining.manifest.json";
 const PROVISIONAL_COASTAL_SOURCE_SHA256 = "055c17d26b7aa7814708d3d73b7110571349303a93a5bc12d9475da31fdcdbdd";
+const PRECISION_SOURCE = "backend/reference-data/jwla-034-precision-references.source.geojson";
+const PRECISION_MANIFEST = "backend/reference-data/jwla-034-precision-references.manifest.json";
+const PRECISION_SUBSET = "backend/reference-data/natural-earth-v5.1.2-jwla034-precision-subsets.geojson";
+const PRECISION_SOURCE_SHA256 = "1b18b7248d47e3c4db53cb2cb80be635dcca781149ec6aabfeea4bf9ce164f22";
+const PRECISION_MANIFEST_SHA256 = "3bbb5fca57b73d43ed2ab7a583ee2b7ede10d9769030854cf36eb19e332aa800";
+const PRECISION_SUBSET_SHA256 = "cb1cd8304062373c48610be14bcd6b8f63389bb66cff10a8f9e3b74727b7bef9";
+const NATURAL_EARTH_PRECISION_PROVENANCE = Object.freeze({
+  version: "v5.1.2",
+  tagCommit: "f1890d9f152c896d250a77557a5751a93d494776",
+  oceanUrl: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_ocean.geojson",
+  admin0CountriesUrl: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_countries.geojson",
+  license: "Public domain",
+  licenseUrl: "https://www.naturalearthdata.com/about/terms-of-use/",
+});
+const PRECISION_IDS = [
+  "jwla-034:precision:black-sea-azov-marine",
+  "jwla-034:precision:gulf-of-guinea-water",
+  "jwla-034:precision:iran-caspian-12nm",
+];
+const PRECISION_GEOMETRY_STATUSES = [
+  "derived-marine-reference-inland-waters-excluded",
+  "derived-water-only-reference",
+  "provisional-derived-12nm-reference",
+];
 const MARINE_REGIONS_PROVENANCE = Object.freeze({
   dataset: "World 12 Nautical Miles Zone (Territorial Seas)",
   version: "v4",
@@ -123,6 +147,70 @@ function loadProvisionalCoastalSource() {
   // is exercised once in the generator contract suite, not on every deterministic build
   // or crash-recovery probe; assertWellFormed still enforces coordinate/ring structure.
   return { source, manifest };
+}
+
+function loadPrecisionSource() {
+  const artifactBytes = fs.readFileSync(path.join(root, PRECISION_SOURCE));
+  const manifestBytes = fs.readFileSync(path.join(root, PRECISION_MANIFEST));
+  const subsetBytes = fs.readFileSync(path.join(root, PRECISION_SUBSET));
+  const artifactDigest = createHash("sha256").update(artifactBytes).digest("hex");
+  const manifestDigest = createHash("sha256").update(manifestBytes).digest("hex");
+  const subsetDigest = createHash("sha256").update(subsetBytes).digest("hex");
+  if (artifactDigest !== PRECISION_SOURCE_SHA256 || manifestDigest !== PRECISION_MANIFEST_SHA256
+      || subsetDigest !== PRECISION_SUBSET_SHA256) {
+    throw new Error("Pinned precision artifact, manifest, or subset hash does not match its trust anchor");
+  }
+  const manifest = JSON.parse(manifestBytes);
+  const artifact = JSON.parse(artifactBytes);
+  const exactManifestContract = manifest.schemaVersion === 1
+    && manifest.dataset === "JWLA-034 precision references"
+    && manifest.reviewStatus === "manual-review-display-only"
+    && manifest.manualReviewRequired === true
+    && manifest.artifact === PRECISION_SOURCE
+    && manifest.artifactSha256 === PRECISION_SOURCE_SHA256
+    && manifest.sourceSubset === PRECISION_SUBSET
+    && manifest.sourceSubsetSha256 === PRECISION_SUBSET_SHA256
+    && manifest.sourceSha256?.officialCircular === SOURCE_SHA256
+    && manifest.sourceSha256?.naturalEarthOcean === "f9696a1337c746a0f6c8c13bc60d0f230d2ef8d105198d5657726c8f8e763fc2"
+    && manifest.sourceSha256?.naturalEarthAdmin0Countries === "239eec57ac17f100a11e2536cffc56752c318b50ae765b0918ff7aab4ce8f255"
+    && manifest.officialCircular?.reference === CIRCULAR
+    && manifest.officialCircular?.publishedAt === PUBLISHED_AT
+    && manifest.officialCircular?.url === SOURCE_URL
+    && Object.entries(NATURAL_EARTH_PRECISION_PROVENANCE).every(([key, value]) => manifest.naturalEarth?.[key] === value)
+    && manifest.retrievalRecipe === "python3 backend/scripts/derive-jwla034-precision-references.py --refresh-sources"
+    && manifest.offlineRecipe === "python3 backend/scripts/derive-jwla034-precision-references.py"
+    && manifest.algorithm?.iranCaspianBufferMeters === 22_224
+    && manifest.algorithm?.bufferQuadSegs === 32
+    && /nine-anchor.*Natural Earth.*no inland-water/i.test(manifest.algorithm?.blackSeaAzov || "")
+    && /official.*Natural Earth.*ocean/i.test(manifest.algorithm?.gulfOfGuinea || "")
+    && /project Iran.*buffer Iran.*subtract Iran.*intersect Caspian.*EPSG:4326/i.test(manifest.algorithm?.iranCaspian || "");
+  if (!exactManifestContract) throw new Error("Pinned precision manifest provenance or derivation recipe is unexpected");
+  if (artifact.type !== "FeatureCollection" || JSON.stringify(artifact.features?.map(({ id }) => id)) !== JSON.stringify(PRECISION_IDS)
+      || JSON.stringify(manifest.features?.map(({ id }) => id)) !== JSON.stringify(PRECISION_IDS)) {
+    throw new Error("Pinned precision feature identity or order is unexpected");
+  }
+  for (let index = 0; index < PRECISION_IDS.length; index += 1) {
+    const sourceFeature = artifact.features[index];
+    const manifestFeature = manifest.features[index];
+    if (sourceFeature.properties?.geometryStatus !== PRECISION_GEOMETRY_STATUSES[index]
+        || manifestFeature.geometryStatus !== PRECISION_GEOMETRY_STATUSES[index]
+        || sourceFeature.properties?.monitoringMode !== "reference-only"
+        || sourceFeature.properties?.contractAlertEligible !== false
+        || sourceFeature.properties?.manualReviewRequired !== true
+        || manifestFeature.monitoringMode !== "reference-only"
+        || manifestFeature.contractAlertEligible !== false
+        || manifestFeature.manualReviewRequired !== true
+        || !Array.isArray(manifestFeature.limitations) || manifestFeature.limitations.length !== 2) {
+      throw new Error(`Pinned precision metadata or limitations are unexpected for ${PRECISION_IDS[index]}`);
+    }
+  }
+  if (!/inland waters.*excluded|excluded.*inland waters/i.test(manifest.features[0].limitations.join(" "))
+      || !/Natural Earth.*coastline generalization/i.test(manifest.features[1].limitations.join(" "))
+      || !/not an authoritative.*territorial-sea boundary/i.test(manifest.features[2].limitations.join(" "))
+      || !/manual review is required/i.test(manifest.features[2].limitations.join(" "))) {
+    throw new Error("Pinned precision feature limitations do not match the reviewed contract");
+  }
+  return { artifact, manifest, artifactDigest, manifestDigest };
 }
 
 function firstFeature(relativePath) {
@@ -354,6 +442,47 @@ function buildProvisionalCoastalReferences(coastal) {
   });
 }
 
+function buildPrecisionReferences(precision) {
+  const names = [
+    "JWLA 034 Precision Reference - Black Sea and Sea of Azov Marine Waters",
+    "JWLA 034 Precision Reference - Gulf of Guinea Water Only",
+    "JWLA 034 Precision Reference - Iran Caspian 12NM Provisional",
+  ];
+  return turf.featureCollection(precision.artifact.features.map((feature, index) => ({
+    type: "Feature",
+    id: PRECISION_IDS[index],
+    geometry: feature.geometry,
+    properties: {
+      name: names[index],
+      mapKind: "precision-reference-display-only",
+      scope: "precision-reference",
+      circular: CIRCULAR,
+      publishedAt: PUBLISHED_AT,
+      monitoringMode: "reference-only",
+      contractAlertEligible: false,
+      manualReviewRequired: true,
+      geometryStatus: PRECISION_GEOMETRY_STATUSES[index],
+      reviewStatus: "manual-review-display-only",
+      sourceUrl: SOURCE_URL,
+      sourceDocumentSha256: SOURCE_SHA256,
+      sourceArtifactSha256: precision.artifactDigest,
+      sourceManifestSha256: precision.manifestDigest,
+      sourceSubsetSha256: PRECISION_SUBSET_SHA256,
+      hashAlgorithm: "SHA-256",
+      hashScope: precision.manifest.hashScope,
+      geometrySource: "JWLA-034 official limits independently intersected with Natural Earth v5.1.2 cartographic geometry",
+      naturalEarthVersion: NATURAL_EARTH_PRECISION_PROVENANCE.version,
+      naturalEarthTagCommit: NATURAL_EARTH_PRECISION_PROVENANCE.tagCommit,
+      naturalEarthOceanUrl: NATURAL_EARTH_PRECISION_PROVENANCE.oceanUrl,
+      naturalEarthAdmin0CountriesUrl: NATURAL_EARTH_PRECISION_PROVENANCE.admin0CountriesUrl,
+      license: NATURAL_EARTH_PRECISION_PROVENANCE.license,
+      licenseUrl: NATURAL_EARTH_PRECISION_PROVENANCE.licenseUrl,
+      limitations: precision.manifest.features[index].limitations,
+      accuracyNote: ACCURACY_NOTE,
+    },
+  })));
+}
+
 function buildAreas(countries) {
   const global = readJson("frontend/public/war-risk-zone-global.geojson");
   return turf.featureCollection([
@@ -459,9 +588,11 @@ const OUTPUT_NAMES = [
   "jwla-034-countries.geojson",
   "jwla-034-installations.geojson",
   "jwla-034-coastal-waters-provisional.geojson",
+  "jwla-034-precision-references.geojson",
 ];
-const LEGACY_V1_OUTPUT_NAMES = OUTPUT_NAMES.filter((name) => name !== "jwla-034-coastal-waters-provisional.geojson");
-const JOURNAL_VERSION = 2;
+const LEGACY_V1_OUTPUT_NAMES = OUTPUT_NAMES.slice(0, 5);
+const LEGACY_V2_OUTPUT_NAMES = OUTPUT_NAMES.slice(0, 6);
+const JOURNAL_VERSION = 3;
 
 function fsyncDirectory(directory) {
   const fd = fs.openSync(directory, "r");
@@ -496,9 +627,11 @@ function writeJournalAtomically(journal, token) {
 
 function validateJournal(value) {
   const fail = () => { throw new Error("Invalid JWLA-034 transaction journal"); };
-  if (!value || ![1, JOURNAL_VERSION].includes(value.version) || !["prepared", "rolled-back", "committed"].includes(value.phase)) fail();
+  if (!value || ![1, 2, JOURNAL_VERSION].includes(value.version) || !["prepared", "rolled-back", "committed"].includes(value.phase)) fail();
   if (typeof value.token !== "string" || !/^[0-9]+-[0-9a-f-]{36}$/.test(value.token)) fail();
-  const expectedOutputNames = value.version === 1 ? LEGACY_V1_OUTPUT_NAMES : OUTPUT_NAMES;
+  const expectedOutputNames = value.version === 1
+    ? LEGACY_V1_OUTPUT_NAMES
+    : value.version === 2 ? LEGACY_V2_OUTPUT_NAMES : OUTPUT_NAMES;
   if (!Array.isArray(value.entries) || value.entries.length !== expectedOutputNames.length) fail();
   const observedNames = new Set();
   const entries = value.entries.map((entry) => {
@@ -675,11 +808,13 @@ function main() {
   // Verify every pinned input before constructing or replacing any generated output.
   const coastal = loadVerifiedCoastalSource();
   const provisionalCoastal = loadProvisionalCoastalSource();
+  const precision = loadPrecisionSource();
   const countries = readJson("backend/countries.geojson");
   console.log("Building JWLA-034 area references...");
   const areas = buildAreas(countries);
   const coastalWaters = turf.featureCollection(buildCoastalReferences(coastal));
   const provisionalCoastalWaters = turf.featureCollection(buildProvisionalCoastalReferences(provisionalCoastal));
+  const precisionReferences = buildPrecisionReferences(precision);
   console.log("Building JWLA-034 amendments...");
   const amendments = buildAmendments(countries);
   console.log("Building JWLA-034 country references...");
@@ -691,6 +826,8 @@ function main() {
   assertWellFormed(coastalWaters, "coastal waters");
   console.log("Validating JWLA-034 provisional coastal reference structure...");
   assertWellFormed(provisionalCoastalWaters, "provisional coastal waters");
+  console.log("Validating JWLA-034 precision reference structure...");
+  assertWellFormed(precisionReferences, "precision references");
   console.log("Validating JWLA-034 amendment structure...");
   assertWellFormed(amendments, "amendments");
   console.log("Validating JWLA-034 country reference structure...");
@@ -705,6 +842,7 @@ function main() {
     ["jwla-034-countries.geojson", listedCountries],
     ["jwla-034-installations.geojson", installations],
     ["jwla-034-coastal-waters-provisional.geojson", provisionalCoastalWaters],
+    ["jwla-034-precision-references.geojson", precisionReferences],
   ];
   publishOutputsTransactionally(outputs);
   console.log(JSON.stringify({
@@ -715,6 +853,7 @@ function main() {
     countries: listedCountries.features.length,
     installations: installations.features.length,
     provisionalCoastalWaters: provisionalCoastalWaters.features.length,
+    precisionReferences: precisionReferences.features.length,
     files: outputs.map(([name]) => path.join(outDir, name)),
   }, null, 2));
 }

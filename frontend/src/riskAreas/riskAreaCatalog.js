@@ -14,6 +14,7 @@ const ITF_SOURCE = "https://www.itfseafarers.org/en/resources/itf-warlike-and-hi
 const IWL_SOURCE = "https://jwla.ai/api/docs/IWL-1.7.76-CL26.pdf";
 const COASTAL_URL = "/risk-areas/jwla-034-coastal-waters.geojson";
 const PROVISIONAL_COASTAL_URL = "/risk-areas/jwla-034-coastal-waters-provisional.geojson";
+const PRECISION_REFERENCE_URL = "/risk-areas/jwla-034-precision-references.geojson";
 
 const item = ({
   id,
@@ -174,6 +175,51 @@ export const JWC_034_PROVISIONAL_COASTAL = Object.freeze([
     sourceUrl: JWC_SOURCE,
     color: "#f97316",
     dataStatus: "manual-review",
+  }),
+]);
+
+export const JWC_034_PRECISION_REFERENCES = Object.freeze([
+  item({
+    id: "jwc-034-precision-black-sea-azov-marine",
+    label: "Black Sea and Sea of Azov marine waters",
+    layerKey: "JWLA 034 Precision Reference - Black Sea and Sea of Azov Marine Waters",
+    badge: "DERIVED",
+    note: "Derived cartographic marine-water reference only; non-authoritative and requires manual review. JWLA-034 inland-water clauses are excluded.",
+    color: "#06b6d4",
+    opacity: 0.12,
+    manualReviewRequired: true,
+    contractAlertEligible: false,
+  }),
+  item({
+    id: "jwc-034-precision-gulf-of-guinea-water",
+    label: "Gulf of Guinea water-only reference",
+    layerKey: "JWLA 034 Precision Reference - Gulf of Guinea Water Only",
+    badge: "DERIVED",
+    note: "Derived cartographic water-mask reference only; non-authoritative and requires manual review before use.",
+    color: "#06b6d4",
+    opacity: 0.12,
+    manualReviewRequired: true,
+    contractAlertEligible: false,
+  }),
+  item({
+    id: "jwc-034-precision-iran-caspian-12nm",
+    label: "Iran Caspian 12NM provisional reference",
+    layerKey: "JWLA 034 Precision Reference - Iran Caspian 12NM Provisional",
+    badge: "PROVISIONAL",
+    note: "Provisional cartographic 12NM derivation; not authoritative for Iranian or Caspian limits and requires manual review.",
+    color: "#f59e0b",
+    opacity: 0.12,
+    manualReviewRequired: true,
+    contractAlertEligible: false,
+  }),
+  pending("jwc-034-precision-inland-waters-unresolved", "Ukraine / Don / Donets / Belarus inland waters", {
+    badge: "UNRESOLVED",
+    note: "No defensible geometry is available; manual review is required. This row cannot be toggled or focused and does not fetch map data.",
+    sourceUrl: JWC_SOURCE,
+    color: "#94a3b8",
+    dataStatus: "manual-review",
+    manualReviewRequired: true,
+    contractAlertEligible: false,
   }),
 ]);
 
@@ -403,6 +449,16 @@ export const RISK_AREA_SECTIONS = Object.freeze([
     items: JWC_034_PROVISIONAL_COASTAL,
   },
   {
+    id: "jwc-034-precision-references",
+    regime: "JWC derived cartographic reference",
+    label: "JWLA-034 Precision References (Display Only)",
+    countLabel: "3 derived references · inland waters unresolved",
+    description: "Optional Natural Earth-derived cartographic references. Default off, non-authoritative, manual-review only, and never connected to backend contract alerts.",
+    defaultOpen: false,
+    color: "#06b6d4",
+    items: JWC_034_PRECISION_REFERENCES,
+  },
+  {
     id: "contract-alerts",
     regime: "JWLA-033 / Backend",
     label: "JWLA-033 Baseline Areas",
@@ -512,6 +568,12 @@ export function planProvisionalCoastalLoadRequest({ settings = {}, focusKey = nu
   const shouldLoad = shouldLoadSectionLayers("jwc-034-provisional-coastal", settings, focusKey);
   const shouldRequest = shouldLoad && !loaded;
   return { shouldLoad, shouldRequest, urls: shouldRequest ? [PROVISIONAL_COASTAL_URL] : [] };
+}
+
+export function planPrecisionReferenceLoadRequest({ settings = {}, focusKey = null, loaded = false } = {}) {
+  const shouldLoad = shouldLoadSectionLayers("jwc-034-precision-references", settings, focusKey);
+  const shouldRequest = shouldLoad && !loaded;
+  return { shouldLoad, shouldRequest, urls: shouldRequest ? [PRECISION_REFERENCE_URL] : [] };
 }
 
 export function getFeatureBounds(feature) {
