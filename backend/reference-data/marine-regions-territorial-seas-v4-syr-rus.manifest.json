@@ -1,0 +1,18 @@
+{
+  "dataset": "World 12 Nautical Miles Zone (Territorial Seas)",
+  "version": "v4",
+  "publishedAt": "2023-10-25",
+  "downloadedAt": "2026-08-02",
+  "license": "CC BY 4.0",
+  "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+  "sourceUrl": "https://www.marineregions.org/downloads.php",
+  "wfsEndpoint": "https://geo.vliz.be/geoserver/MarineRegions/ows",
+  "retrievalScript": "backend/scripts/fetch-marine-regions-territorial-seas.mjs",
+  "hashAlgorithm": "SHA-256",
+  "hashScope": "artifactSha256 hashes the exact raw bytes of the pinned GeoJSON artifact",
+  "artifactSha256": "00b007a2a76df5b7a59fc8349c0184d1f561da12c3cec5f5acf65d5f10ad4a6f",
+  "features": [
+    { "mrgid": 49096, "iso3": "SYR", "geoname": "Syrian 12 NM" },
+    { "mrgid": 49031, "iso3": "RUS", "geoname": "Russian 12 NM" }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "dataset": "World 12 Nautical Miles Zone (Territorial Seas)",
+  "version": "v4",
+  "publishedAt": "2023-10-25",
+  "downloadedAt": "2026-08-02",
+  "doi": "https://doi.org/10.14284/633",
+  "license": "CC BY 4.0",
+  "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+  "sourceUrl": "https://www.marineregions.org/downloads.php",
+  "wfsEndpoint": "https://geo.vliz.be/geoserver/MarineRegions/ows",
+  "retrievalScript": "backend/scripts/fetch-marine-regions-territorial-seas.mjs --provisional",
+  "hashAlgorithm": "SHA-256",
+  "hashScope": "artifactSha256 hashes the exact raw bytes of the pinned GeoJSON artifact",
+  "artifactSha256": "055c17d26b7aa7814708d3d73b7110571349303a93a5bc12d9475da31fdcdbdd",
+  "reviewStatus": "provisional-display-only",
+  "features": [
+    { "mrgid": 49081, "iso3": "BHR", "geoname": "Bahraini 12 NM" },
+    { "mrgid": 49183, "iso3": "IRN", "geoname": "Iranian 12 NM" },
+    { "mrgid": 49184, "iso3": "IRQ", "geoname": "Iraqi 12 NM" },
+    { "mrgid": 49098, "iso3": "ISR", "geoname": "Israeli 12 NM" },
+    { "mrgid": 49080, "iso3": "KWT", "geoname": "Kuwaiti 12 NM" },
+    { "mrgid": 49097, "iso3": "LBN", "geoname": "Lebanese 12 NM" },
+    { "mrgid": 49077, "iso3": "OMN", "geoname": "Omani 12 NM" },
+    { "mrgid": 49182, "iso3": "QAT", "geoname": "Qatari 12 NM" },
+    { "mrgid": 49079, "iso3": "SAU", "geoname": "Saudi Arabian 12 NM" },
+    { "mrgid": 49083, "iso3": "ARE", "geoname": "Emirati 12 NM" },
+    { "mrgid": 49076, "iso3": "YEM", "geoname": "Yemeni 12 NM" },
+    { "mrgid": 49075, "iso3": "DJI", "geoname": "Djiboutian 12 NM" },
+    { "mrgid": 49074, "iso3": "ERI", "geoname": "Eritrean 12 NM" },
+    { "mrgid": 49095, "iso3": "LBY", "geoname": "Libyan 12 NM" },
+    { "mrgid": 49073, "iso3": "SOM", "geoname": "Somali 12 NM" },
+    { "mrgid": 49078, "iso3": "SDN", "geoname": "Sudanese 12 NM" },
+    { "mrgid": 49113, "iso3": "BEN", "geoname": "Beninese 12 NM" },
+    { "mrgid": 49188, "iso3": "NGA", "geoname": "Nigerian 12 NM" },
+    { "mrgid": 49112, "iso3": "TGO", "geoname": "Togolese 12 NM" },
+    { "mrgid": 49150, "iso3": "VEN", "geoname": "Venezuelan 12 NM" }
+  ],
+  "renderedMrgids": [
+    49081, 49183, 49184, 49080, 49077, 49182, 49079, 49083, 49076,
+    49075, 49074, 49095, 49073, 49078, 49113, 49188, 49112, 49150
+  ],
+  "withheldFeatures": [
+    {
+      "mrgid": 49098,
+      "iso3": "ISR",
+      "geoname": "Israeli 12 NM",
+      "reason": "source geometry fails turf.booleanValid; manual review required"
+    },
+    {
+      "mrgid": 49097,
+      "iso3": "LBN",
+      "geoname": "Lebanese 12 NM",
+      "reason": "source geometry fails turf.booleanValid; manual review required"
+    }
+  ]
+}

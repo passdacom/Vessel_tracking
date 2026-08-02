@@ -17,3 +17,5 @@ prisma/dev.db
 .claude/settings.local.json
 .worktrees/
 graphify-out/
+__pycache__/
+*.py[cod]
