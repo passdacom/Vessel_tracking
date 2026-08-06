@@ -5,6 +5,7 @@ import {
   JWLA_033_COMPARISON_KEY,
   RISK_AREA_SECTIONS,
   allRiskAreaItems,
+  groupSectionItems,
   isComparisonModeEnabled,
   migrateRiskAreaSettings,
   setComparisonMode,
@@ -17,7 +18,7 @@ test("JWLA-034 is one top-level group classified by official meaning", () => {
   assert.ok(jwla);
   assert.equal(jwla.label, "JWLA-034 Listed Areas");
   assert.deepEqual(jwla.subsections.map(({ id, label, items }) => [id, label, items.length]), [
-    ["jwla-034-defined-waters", "Defined Waters", 4],
+    ["jwla-034-defined-waters", "Defined Waters", 10],
     ["jwla-034-named-countries", "JWLA-034 Named Countries", 22],
     ["jwla-034-special-call-only", "Special Call-Only Areas", 1],
   ]);
@@ -46,7 +47,6 @@ test("Venezuela is one named-country row with 12NM coastal waters and installati
   const guyana = special.items.find(({ label }) => label.startsWith("Guyana"));
 
   assert.deepEqual(venezuela.layerKeys, [
-    "JWLA 034 Country - Venezuela",
     "JWLA 034 Coastal Waters - Venezuela 12NM",
     "JWLA 034 - Venezuela Offshore Installation Reference",
   ]);
@@ -64,18 +64,14 @@ test("geometry quality is item metadata rather than a top-level group", () => {
   const countries = bySection("jwla-034").subsections.find(({ id }) => id === "jwla-034-named-countries").items;
   assert.equal(countries.find(({ label }) => label === "Russia").geometryStatus, "verified");
   assert.equal(countries.find(({ label }) => label === "Venezuela").geometryStatus, "provisional");
-  assert.equal(countries.find(({ label }) => label === "Israel").geometryStatus, "withheld");
-  assert.equal(countries.find(({ label }) => label === "Lebanon").geometryStatus, "withheld");
+  assert.equal(countries.find(({ label }) => label === "Israel").geometryStatus, "existing-baseline");
+  assert.equal(countries.find(({ label }) => label === "Lebanon").geometryStatus, "existing-baseline");
+  assert.ok(countries.every(({ defaultVisible }) => defaultVisible));
+  assert.ok(countries.every(({ layerKeys }) => layerKeys.every((key) => !key.startsWith("JWLA 034 Country - "))));
 
   const defined = bySection("jwla-034").subsections.find(({ id }) => id === "jwla-034-defined-waters").items;
-  for (const areaItem of [
-    defined.find(({ label }) => label === "Black Sea & Sea of Azov"),
-    defined.find(({ label }) => label === "Gulf of Guinea"),
-    countries.find(({ label }) => label === "Iran"),
-  ]) {
-    assert.match(areaItem.precisionReferenceStatus, /derived-audit-only/);
-    assert.match(areaItem.note, /precision reference.*audit-only.*not canonical/i);
-  }
+  assert.ok([...defined, ...countries].every((areaItem) => areaItem.precisionReferenceStatus === undefined));
+  assert.ok([...defined, ...countries].every((areaItem) => !/precision reference/i.test(areaItem.note || "")));
 });
 
 test("JWLA-033 comparison is one default-off gate that preserves legacy child settings", () => {
@@ -96,13 +92,36 @@ test("JWLA-033 comparison is one default-off gate that preserves legacy child se
     "JWLA 034 Country - Venezuela": { visible: true, color: "#123456", opacity: 0.2 },
   });
   for (const layerKey of [
-    "JWLA 034 Country - Venezuela",
     "JWLA 034 Coastal Waters - Venezuela 12NM",
     "JWLA 034 - Venezuela Offshore Installation Reference",
   ]) {
     assert.equal(legacyVenezuela[layerKey].visible, true);
   }
-  assert.equal(legacyVenezuela["JWLA 034 Country - Venezuela"].color, "#123456");
+  assert.equal(legacyVenezuela["JWLA 034 Coastal Waters - Venezuela 12NM"].color, "#123456");
+});
+
+test("current defined waters expose individually styled 034 subregions including the added area", () => {
+  const defined = bySection("jwla-034").subsections.find(({ id }) => id === "jwla-034-defined-waters").items;
+  assert.deepEqual(defined.map(({ label, group }) => [label, group]), [
+    ["Persian Gulf (PG)", "Middle East & Southern Red Sea"],
+    ["Gulf of Oman (GOO)", "Middle East & Southern Red Sea"],
+    ["Gulf of Aden", "Middle East & Southern Red Sea"],
+    ["Red Sea south of 18°N", "Middle East & Southern Red Sea"],
+    ["JWLA-034 Added Area · Red Sea 18°N–25.5°N", "Middle East & Southern Red Sea"],
+    ["Arabian Sea (JWC West)", "Middle East & Southern Red Sea"],
+    ["Indian Ocean (JWC North-West)", "Middle East & Southern Red Sea"],
+    ["Black Sea & Sea of Azov", "Black Sea & Sea of Azov"],
+    ["Gulf of Guinea", "Gulf of Guinea"],
+    ["Cabo Delgado", "Cabo Delgado"],
+  ]);
+  assert.equal(new Set(defined.map(({ color }) => color)).size, defined.length);
+  assert.ok(defined.every(({ defaultVisible }) => defaultVisible));
+  assert.deepEqual(groupSectionItems({ items: defined }).map(({ label, items }) => [label, items.length]), [
+    ["Middle East & Southern Red Sea", 7],
+    ["Black Sea & Sea of Azov", 1],
+    ["Gulf of Guinea", 1],
+    ["Cabo Delgado", 1],
+  ]);
 });
 
 test("panel exposes one JWLA-033 comparison control and no implementation-status groups", () => {
@@ -116,15 +135,16 @@ test("panel exposes one JWLA-033 comparison control and no implementation-status
 
 test("allRiskAreaItems flattens JWLA subsections for shared visibility helpers", () => {
   const items = allRiskAreaItems();
-  assert.ok(items.some(({ id }) => id === "jwc-034-current-combined-waters"));
+  assert.ok(items.some(({ id }) => id === "jwc-034-current-persian-gulf"));
   assert.ok(items.some(({ id }) => id === "jwc-country-venezuela"));
   assert.ok(items.some(({ id }) => id === "jwc-guyana-installations"));
 });
 
-test("map mounts only visible features from lazy-loaded collections", () => {
+test("map mounts only visible current, coastal, installation and comparison features", () => {
   const source = fs.readFileSync(new URL("../components/Map/RestrictedZone.jsx", import.meta.url), "utf8");
   assert.match(source, /visibleFeatureCollection/);
-  assert.match(source, /data=\{visibleCountries\}/);
+  assert.match(source, /data=\{visibleAreas\}/);
+  assert.match(source, /data=\{visibleCoastal\}/);
   assert.match(source, /data=\{visibleProvisionalCoastal\}/);
   assert.match(source, /data=\{visibleInstallations\}/);
   assert.match(source, /data=\{visibleContractAlerts\}/);

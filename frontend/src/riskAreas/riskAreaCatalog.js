@@ -44,42 +44,40 @@ const item = ({
 });
 
 const VERIFIED_COASTAL_COUNTRIES = new Set(["russia", "syria"]);
-const WITHHELD_COASTAL_COUNTRIES = new Set(["israel", "lebanon"]);
+const EXISTING_COASTAL_COUNTRIES = new Set(["israel", "lebanon"]);
 
 const country = (id, label, group) => {
   const geometryStatus = VERIFIED_COASTAL_COUNTRIES.has(id)
     ? "verified"
-    : WITHHELD_COASTAL_COUNTRIES.has(id)
-      ? "withheld"
+    : EXISTING_COASTAL_COUNTRIES.has(id)
+      ? "existing-baseline"
       : "provisional";
   const coastalLayerKey = `JWLA 034 Coastal Waters - ${label} 12NM`;
-  const layerKeys = [`JWLA 034 Country - ${label}`];
-  if (geometryStatus !== "withheld") layerKeys.push(coastalLayerKey);
+  const layerKeys = [coastalLayerKey];
   if (id === "venezuela") layerKeys.push("JWLA 034 - Venezuela Offshore Installation Reference");
 
   let note;
   if (id === "venezuela") {
-    note = "JWLA-034 named-country scope: ports and coastal waters up to 12NM, plus offshore installations in the Venezuelan EEZ. The EEZ is not a blanket listed area or transit geofence.";
+    note = "Current JWLA-034 scope: ports and coastal waters up to 12NM, plus offshore installations in the Venezuelan EEZ. The EEZ is not a blanket listed area or transit geofence.";
   } else if (id === "iraq") {
-    note = "JWLA-034 named-country scope: ports and coastal waters up to 12NM, including all Iraqi offshore oil terminals. Terminal calls require manual review; no blanket offshore-water geofence is implied.";
-  } else if (geometryStatus === "withheld") {
-    note = "JWLA-034 named-country scope: ports and coastal waters up to 12NM. The land outline remains available, but the 12NM source geometry is withheld because validation failed.";
+    note = "Current JWLA-034 scope: ports and coastal waters up to 12NM, including all Iraqi offshore oil terminals. Terminal calls require manual review; no blanket offshore-water geofence is implied.";
+  } else if (geometryStatus === "existing-baseline") {
+    note = "Current JWLA-034 scope: ports and coastal waters up to 12NM. This visible geometry reuses the existing reviewed baseline input while replacement-source validation continues.";
+  } else if (geometryStatus === "provisional") {
+    note = "Current JWLA-034 scope: ports and coastal waters up to 12NM. The source-derived coastal geometry is displayed as the current reference; source review status is retained in metadata and it does not feed backend alerts.";
   } else {
-    note = "JWLA-034 named-country scope: ports and coastal waters up to 12NM. The land outline is neutral context; the coastal-water geometry is display-only.";
-  }
-
-  const precisionReferenceStatus = id === "iran" ? "derived-audit-only" : undefined;
-  if (precisionReferenceStatus) {
-    note += " A derived Iran Caspian 12NM precision reference is retained audit-only; it is not canonical and is not rendered as another area.";
+    note = "Current JWLA-034 scope: ports and coastal waters up to 12NM. Reviewed source-derived coastal geometry; display controls do not change backend alerts.";
   }
 
   const badge = id === "venezuela"
-    ? "12NM + INSTALLATIONS"
+    ? "CURRENT · 12NM + INSTALLATIONS"
     : id === "iraq"
-      ? "PROVISIONAL + TERMINALS"
-      : id === "iran"
-        ? "PROVISIONAL · DERIVED REF"
-        : geometryStatus.toUpperCase();
+      ? "CURRENT · TERMINALS"
+      : geometryStatus === "verified"
+        ? "CURRENT · REVIEWED"
+        : geometryStatus === "existing-baseline"
+          ? "CURRENT · EXISTING 12NM"
+          : "CURRENT · SOURCE REVIEW";
 
   return {
     ...item({
@@ -88,10 +86,11 @@ const country = (id, label, group) => {
       layerKeys,
       badge,
       note,
+      defaultVisible: true,
       color: "#f97316",
-      opacity: 0.04,
+      opacity: 0.1,
       geometryStatus,
-      precisionReferenceStatus,
+      manualReviewRequired: geometryStatus === "provisional",
     }),
     group,
   };
@@ -109,49 +108,30 @@ const pending = (id, label, { badge, note, sourceUrl, color, dataStatus = "pendi
   ...metadata,
 });
 
+const currentWater = (id, label, layerKey, group, color, note, extra = {}) => item({
+  id: `jwc-034-current-${id}`,
+  label,
+  layerKey,
+  group,
+  badge: id === "red-sea-added" ? "CURRENT · 034 ADDED" : "CURRENT",
+  note,
+  defaultVisible: true,
+  color,
+  opacity: id === "red-sea-added" ? 0.22 : 0.15,
+  ...extra,
+});
+
 const JWC_034_CURRENT_WATERS = [
-  item({
-    id: "jwc-034-current-combined-waters",
-    label: "Middle East & Southern Red Sea defined waters",
-    layerKey: "JWLA 034 - Combined Middle East and Southern Red Sea Waters",
-    badge: "CURRENT",
-    note: "Current JWLA-034 informational reconstruction. Egyptian territorial waters use pinned approximate reference geometry.",
-    defaultVisible: true,
-    color: "#dc2626",
-    opacity: 0.15,
-  }),
-  item({
-    id: "jwc-034-current-black-sea",
-    label: "Black Sea & Sea of Azov",
-    layerKey: "JWLA 034 - Black Sea & Sea of Azov",
-    badge: "CURRENT · DERIVED REF",
-    note: "Current maritime reference boundary. A derived marine-water precision reference is retained audit-only and is not canonical. The circular's Ukraine, Don, Donets and Belarus inland-water clauses remain unresolved.",
-    defaultVisible: true,
-    color: "#dc2626",
-    opacity: 0.15,
-    precisionReferenceStatus: "derived-audit-only-with-unresolved-inland-waters",
-  }),
-  item({
-    id: "jwc-034-current-gulf-guinea",
-    label: "Gulf of Guinea",
-    layerKey: "JWLA 034 - Gulf of Guinea",
-    badge: "CURRENT · DERIVED REF",
-    note: "Current anchor-based informational reconstruction; coastline closure remains approximate. A derived water-only precision reference is retained audit-only and is not canonical.",
-    defaultVisible: true,
-    color: "#dc2626",
-    opacity: 0.15,
-    precisionReferenceStatus: "derived-audit-only",
-  }),
-  item({
-    id: "jwc-034-current-cabo-delgado",
-    label: "Cabo Delgado",
-    layerKey: "JWLA 034 - Cabo Delgado",
-    badge: "CURRENT",
-    note: "Current Tanzania and Mozambique coastline-buffer reference constrained by the circular's published limits.",
-    defaultVisible: true,
-    color: "#dc2626",
-    opacity: 0.15,
-  }),
+  currentWater("persian-gulf", "Persian Gulf (PG)", "JWLA 034 - Persian Gulf", "Middle East & Southern Red Sea", "#dc2626", "Current JWLA-034 subregion; individually styleable."),
+  currentWater("gulf-of-oman", "Gulf of Oman (GOO)", "JWLA 034 - Gulf of Oman", "Middle East & Southern Red Sea", "#f97316", "Current JWLA-034 subregion; individually styleable."),
+  currentWater("gulf-of-aden", "Gulf of Aden", "JWLA 034 - Gulf of Aden", "Middle East & Southern Red Sea", "#fb7185", "Current JWLA-034 subregion; individually styleable."),
+  currentWater("red-sea-south", "Red Sea south of 18°N", "JWLA 034 - Red Sea south of 18N", "Middle East & Southern Red Sea", "#e11d48", "Current JWLA-034 Red Sea base south of the JWLA-033 18°N limit."),
+  currentWater("red-sea-added", "JWLA-034 Added Area · Red Sea 18°N–25.5°N", "JWLA 034 - Red Sea Added Area 18N to 25.5N", "Middle East & Southern Red Sea", "#facc15", "Current JWLA-034 northward extension. Egyptian territorial waters are excluded with approximate reference geometry.", { changeType: "northward-extension", previousCircular: "JWLA-033" }),
+  currentWater("arabian-sea", "Arabian Sea (JWC West)", "JWLA 034 - Arabian Sea JWC West", "Middle East & Southern Red Sea", "#8b5cf6", "Current JWLA-034 subregion; individually styleable."),
+  currentWater("indian-ocean", "Indian Ocean (JWC North-West)", "JWLA 034 - Indian Ocean JWC North-West", "Middle East & Southern Red Sea", "#06b6d4", "Current JWLA-034 subregion; individually styleable."),
+  currentWater("black-sea", "Black Sea & Sea of Azov", "JWLA 034 - Black Sea & Sea of Azov", "Black Sea & Sea of Azov", "#3b82f6", "Current maritime reference boundary. The circular's Ukraine, Don, Donets and Belarus inland-water clauses remain unresolved."),
+  currentWater("gulf-guinea", "Gulf of Guinea", "JWLA 034 - Gulf of Guinea", "Gulf of Guinea", "#a855f7", "Current anchor-based informational reconstruction; coastline closure remains approximate."),
+  currentWater("cabo-delgado", "Cabo Delgado", "JWLA 034 - Cabo Delgado", "Cabo Delgado", "#14b8a6", "Current Tanzania and Mozambique coastline-buffer reference constrained by the circular's published limits."),
 ];
 
 const PROVISIONAL_COASTAL_SPECS = [
@@ -175,92 +155,6 @@ const PROVISIONAL_COASTAL_SPECS = [
   ["venezuela", "Venezuela"],
 ];
 
-export const JWC_034_PROVISIONAL_COASTAL = Object.freeze([
-  ...PROVISIONAL_COASTAL_SPECS.map(([id, label]) => item({
-    id: `jwc-034-coastal-${id}`,
-    label: `${label} 12NM coastal waters`,
-    layerKey: `JWLA 034 Coastal Waters - ${label} 12NM`,
-    badge: "PROVISIONAL",
-    note: "Provisional display-only coastal reference; manual review is required and this layer is not connected to backend contract alerts.",
-    defaultVisible: false,
-    color: "#f97316",
-    opacity: 0.1,
-  })),
-  pending("jwc-034-coastal-israel", "Israel 12NM coastal waters", {
-    badge: "WITHHELD",
-    note: "Source geometry is withheld from display because validation failed; manual review is required.",
-    sourceUrl: JWC_SOURCE,
-    color: "#f97316",
-    dataStatus: "manual-review",
-  }),
-  pending("jwc-034-coastal-lebanon", "Lebanon 12NM coastal waters", {
-    badge: "WITHHELD",
-    note: "Source geometry is withheld from display because validation failed; manual review is required.",
-    sourceUrl: JWC_SOURCE,
-    color: "#f97316",
-    dataStatus: "manual-review",
-  }),
-]);
-
-export const JWC_034_PRECISION_REFERENCES = Object.freeze([
-  item({
-    id: "jwc-034-precision-black-sea-azov-marine",
-    label: "Black Sea and Sea of Azov marine waters",
-    layerKey: "JWLA 034 Precision Reference - Black Sea and Sea of Azov Marine Waters",
-    badge: "DERIVED",
-    note: "Derived cartographic marine-water reference only; non-authoritative and requires manual review. JWLA-034 inland-water clauses are excluded.",
-    color: "#06b6d4",
-    opacity: 0.12,
-    manualReviewRequired: true,
-    contractAlertEligible: false,
-  }),
-  item({
-    id: "jwc-034-precision-gulf-of-guinea-water",
-    label: "Gulf of Guinea water-only reference",
-    layerKey: "JWLA 034 Precision Reference - Gulf of Guinea Water Only",
-    badge: "DERIVED",
-    note: "Derived cartographic water-mask reference only; non-authoritative and requires manual review before use.",
-    color: "#06b6d4",
-    opacity: 0.12,
-    manualReviewRequired: true,
-    contractAlertEligible: false,
-  }),
-  item({
-    id: "jwc-034-precision-iran-caspian-12nm",
-    label: "Iran Caspian 12NM provisional reference",
-    layerKey: "JWLA 034 Precision Reference - Iran Caspian 12NM Provisional",
-    badge: "PROVISIONAL",
-    note: "Provisional cartographic 12NM derivation; not authoritative for Iranian or Caspian limits and requires manual review.",
-    color: "#f59e0b",
-    opacity: 0.12,
-    manualReviewRequired: true,
-    contractAlertEligible: false,
-  }),
-  pending("jwc-034-precision-inland-waters-unresolved", "Ukraine / Don / Donets / Belarus inland waters", {
-    badge: "UNRESOLVED",
-    note: "No defensible geometry is available; manual review is required. This row cannot be toggled or focused and does not fetch map data.",
-    sourceUrl: JWC_SOURCE,
-    color: "#94a3b8",
-    dataStatus: "manual-review",
-    manualReviewRequired: true,
-    contractAlertEligible: false,
-  }),
-]);
-
-const JWC_034_AMENDMENTS = [
-  item({
-    id: "jwc-034-red-sea-northward-extension",
-    label: "Red Sea northward extension · 18°N → 25.5°N",
-    layerKey: "JWLA 034 Amendment - Red Sea 18N to 25.5N",
-    badge: "034 NEW",
-    note: "Only the area added north of the JWLA-033 18°N limit is shown. Egyptian territorial waters are excluded with approximate reference geometry.",
-    defaultVisible: false,
-    color: "#facc15",
-    opacity: 0.22,
-    mapKind: "version-amendment",
-  }),
-];
-
 const JWC_SPECIAL_CALL_ONLY = [
   item({
     id: "jwc-guyana-installations",
@@ -268,6 +162,7 @@ const JWC_SPECIAL_CALL_ONLY = [
     layerKey: "JWLA 034 - Guyana Offshore Installation Reference",
     badge: "CALLS ONLY",
     note: "JWLA-034 applies only to calls to offshore installations in the Guyanese EEZ beyond territorial waters. Guyana is not a general 12NM named-country area, and simple EEZ transit is not an entry event.",
+    defaultVisible: true,
     color: "#fb7185",
     opacity: 0.05,
   }),
@@ -447,8 +342,8 @@ const JWLA_034_SUBSECTIONS = Object.freeze([
     id: "jwla-034-defined-waters",
     regime: "JWLA-034",
     label: "Defined Waters",
-    countLabel: "4 areas",
-    description: "Four current JWLA-034 defined-water areas. These reference layers do not change backend alerts.",
+    countLabel: "4 official areas · 10 styleable layers",
+    description: "Four official current defined-water areas are split into ten independently styleable map layers, including the JWLA-034 Added Area.",
     defaultOpen: true,
     color: "#dc2626",
     items: JWC_034_CURRENT_WATERS,
@@ -458,8 +353,8 @@ const JWLA_034_SUBSECTIONS = Object.freeze([
     regime: "JWLA-034",
     label: "JWLA-034 Named Countries",
     countLabel: "22 countries",
-    description: "Named countries cover ports and coastal waters up to 12NM unless specifically varied. Land outlines are neutral context; geometry quality is shown per country.",
-    defaultOpen: false,
+    description: "All 22 current named-country coastal waters up to 12NM are visible by default. Geometry source-review status is metadata, not a separate map group.",
+    defaultOpen: true,
     color: "#f97316",
     items: JWC_COUNTRIES,
   },
@@ -480,7 +375,7 @@ export const RISK_AREA_SECTIONS = Object.freeze([
     id: "jwla-034",
     regime: "JWC",
     label: "JWLA-034 Listed Areas",
-    countLabel: "4 waters · 22 countries · 1 call-only condition",
+    countLabel: "10 water layers · 22 country coasts · 1 call-only condition",
     description: "Current JWC Listed Areas grouped by official meaning, not by geometry implementation status.",
     defaultOpen: true,
     color: "#dc2626",
@@ -529,25 +424,43 @@ export function allRiskAreaItems() {
   ));
 }
 
+export function groupSectionItems(section) {
+  const grouped = new Map();
+  for (const areaItem of section?.items || []) {
+    const label = areaItem.group || "Other";
+    if (!grouped.has(label)) grouped.set(label, []);
+    grouped.get(label).push(areaItem);
+  }
+  return [...grouped].map(([label, items]) => ({ label, items }));
+}
+
 export const JWLA_033_COMPARISON_KEY = "__jwla033ComparisonVisible";
 
 export function migrateRiskAreaSettings(settings) {
   const current = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
-  if (current.__jwlaCatalogVersion === 2) return current;
+  if (current.__jwlaCatalogVersion === 3) return current;
   const next = {
     ...current,
-    [JWLA_033_COMPARISON_KEY]: false,
-    __jwlaCurrentDefaultsVersion: 2,
-    __jwlaCatalogVersion: 2,
+    [JWLA_033_COMPARISON_KEY]: current[JWLA_033_COMPARISON_KEY] === true,
+    __jwlaCurrentDefaultsVersion: 3,
+    __jwlaCatalogVersion: 3,
   };
 
+  const legacyCombined = current["JWLA 034 - Combined Middle East and Southern Red Sea Waters"];
+  if (legacyCombined) {
+    for (const areaItem of JWC_034_CURRENT_WATERS.filter(({ group }) => group === "Middle East & Southern Red Sea")) {
+      const layerKey = areaItem.layerKeys[0];
+      next[layerKey] = { ...getLayerDefaults(layerKey), ...legacyCombined, ...current[layerKey] };
+    }
+  }
+
   for (const areaItem of JWC_COUNTRIES) {
-    const explicitSettings = areaItem.layerKeys
-      .map((layerKey) => current[layerKey])
+    const legacyLand = current[`JWLA 034 Country - ${areaItem.label}`];
+    const explicitSettings = [legacyLand, ...areaItem.layerKeys.map((layerKey) => current[layerKey])]
       .filter((setting) => typeof setting?.visible === "boolean");
     if (explicitSettings.length === 0) continue;
     const visible = explicitSettings.some((setting) => setting.visible);
-    const styleSource = current[areaItem.layerKeys[0]] || explicitSettings[0];
+    const styleSource = current[areaItem.layerKeys[0]] || legacyLand || explicitSettings[0];
     for (const layerKey of areaItem.layerKeys) {
       next[layerKey] = {
         color: areaItem.color,
@@ -590,9 +503,11 @@ export function shouldLoadSectionLayers(sectionId, settings = {}, focusKey = nul
 const VERIFIED_COASTAL_LAYER_KEYS = new Set([
   "JWLA 034 Coastal Waters - Syria 12NM",
   "JWLA 034 Coastal Waters - Russia 12NM",
+  "JWLA 034 Coastal Waters - Israel 12NM",
+  "JWLA 034 Coastal Waters - Lebanon 12NM",
 ]);
 const PROVISIONAL_COASTAL_LAYER_KEYS = new Set(
-  JWC_034_PROVISIONAL_COASTAL.flatMap((areaItem) => areaItem.layerKeys),
+  PROVISIONAL_COASTAL_SPECS.map(([, label]) => `JWLA 034 Coastal Waters - ${label} 12NM`),
 );
 const INSTALLATION_LAYER_KEYS = new Set([
   "JWLA 034 - Guyana Offshore Installation Reference",
@@ -601,7 +516,7 @@ const INSTALLATION_LAYER_KEYS = new Set([
 
 function shouldLoadLayerKeys(layerKeys, settings = {}, focusKey = null) {
   if (layerKeys.has(focusKey)) return true;
-  return [...layerKeys].some((key) => settings[key]?.visible === true);
+  return [...layerKeys].some((key) => settings[key]?.visible ?? getLayerDefaults(key).visible);
 }
 
 export function shouldLoadCoastalLayers(settings = {}, focusKey = null) {
@@ -760,7 +675,7 @@ export function resetSectionAppearance(settings, section) {
 }
 
 export function getLayerDefaults(layerKey) {
-  const renderItems = [...allRiskAreaItems(), ...CONTRACT_ALERT_ITEMS, ...JWC_034_AMENDMENTS];
+  const renderItems = [...allRiskAreaItems(), ...CONTRACT_ALERT_ITEMS];
   const areaItem = renderItems.find((candidate) => candidate.layerKeys?.includes(layerKey));
   if (!areaItem) return { visible: false, color: "#ef4444", opacity: 0.12 };
   return {

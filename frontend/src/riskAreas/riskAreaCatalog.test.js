@@ -46,7 +46,13 @@ test("catalog source and default JWLA-034 defined waters are current and exact",
   assert.match(JWLA_REFERENCE.sourceUrl, /lmalloyds\.com\/.*JWLA-034/);
   assert.equal(JWLA_REFERENCE.sourceSha256, "125e507bbd187051315bdf80ae30583bc92ec9ad2d280d02fac2d10a019d03b9");
   assert.deepEqual(defined().items.map((areaItem) => areaItem.layerKeys[0]), [
-    "JWLA 034 - Combined Middle East and Southern Red Sea Waters",
+    "JWLA 034 - Persian Gulf",
+    "JWLA 034 - Gulf of Oman",
+    "JWLA 034 - Gulf of Aden",
+    "JWLA 034 - Red Sea south of 18N",
+    "JWLA 034 - Red Sea Added Area 18N to 25.5N",
+    "JWLA 034 - Arabian Sea JWC West",
+    "JWLA 034 - Indian Ocean JWC North-West",
     "JWLA 034 - Black Sea & Sea of Azov",
     "JWLA 034 - Gulf of Guinea",
     "JWLA 034 - Cabo Delgado",
@@ -56,7 +62,7 @@ test("catalog source and default JWLA-034 defined waters are current and exact",
   assert.equal(bySection("iwl").items.length, 13);
 });
 
-test("defined-water planner skips the 2MB asset when all four layers are hidden", () => {
+test("defined-water planner skips the asset when all ten styleable layers are hidden", () => {
   const hidden = Object.fromEntries(defined().items.map((areaItem) => [
     areaItem.layerKeys[0],
     { visible: false },
@@ -85,37 +91,47 @@ test("named countries retain 22 official rows and attach geometry status to each
   assert.match(special().items[0].label, /^Guyana/);
   assert.equal(country("Russia").geometryStatus, "verified");
   assert.equal(country("Syria").geometryStatus, "verified");
-  assert.equal(country("Israel").geometryStatus, "withheld");
-  assert.equal(country("Lebanon").geometryStatus, "withheld");
+  assert.equal(country("Israel").geometryStatus, "existing-baseline");
+  assert.equal(country("Lebanon").geometryStatus, "existing-baseline");
   assert.equal(country("Venezuela").geometryStatus, "provisional");
 });
 
 test("coastal planners load verified and provisional assets only for visible or focused country rows", () => {
-  const syriaCoastal = country("Syria").layerKeys[1];
-  const russiaCoastal = country("Russia").layerKeys[1];
-  const bahrainCoastal = country("Bahrain").layerKeys[1];
-  assert.equal(planCoastalLoadRequest({}).shouldLoad, false);
+  const syriaCoastal = country("Syria").layerKeys[0];
+  const russiaCoastal = country("Russia").layerKeys[0];
+  const bahrainCoastal = country("Bahrain").layerKeys[0];
+  assert.equal(planCoastalLoadRequest({}).shouldLoad, true);
   assert.deepEqual(planCoastalLoadRequest({ focusKey: syriaCoastal }), {
     shouldLoad: true, shouldRequest: true, urls: ["/risk-areas/jwla-034-coastal-waters.geojson"],
   });
   assert.deepEqual(planCoastalLoadRequest({ settings: { [russiaCoastal]: { visible: true } }, loaded: true }), {
     shouldLoad: true, shouldRequest: false, urls: [],
   });
-  assert.deepEqual(planProvisionalCoastalLoadRequest({}), { shouldLoad: false, shouldRequest: false, urls: [] });
+  assert.deepEqual(planProvisionalCoastalLoadRequest({}), {
+    shouldLoad: true, shouldRequest: true, urls: ["/risk-areas/jwla-034-coastal-waters-provisional.geojson"],
+  });
   assert.deepEqual(planProvisionalCoastalLoadRequest({ focusKey: bahrainCoastal }), {
     shouldLoad: true, shouldRequest: true, urls: ["/risk-areas/jwla-034-coastal-waters-provisional.geojson"],
   });
-  assert.equal(planCoastalLoadRequest({ focusKey: bahrainCoastal }).shouldLoad, false);
-  assert.equal(planProvisionalCoastalLoadRequest({ focusKey: syriaCoastal }).shouldLoad, false);
+  const reviewedHidden = Object.fromEntries(
+    countries().items.filter(({ geometryStatus }) => geometryStatus !== "provisional")
+      .map((areaItem) => [areaItem.layerKeys[0], { visible: false }]),
+  );
+  const sourceReviewHidden = Object.fromEntries(
+    countries().items.filter(({ geometryStatus }) => geometryStatus === "provisional")
+      .map((areaItem) => [areaItem.layerKeys[0], { visible: false }]),
+  );
+  assert.equal(planCoastalLoadRequest({ settings: reviewedHidden, focusKey: bahrainCoastal }).shouldLoad, false);
+  assert.equal(planProvisionalCoastalLoadRequest({ settings: sourceReviewHidden, focusKey: syriaCoastal }).shouldLoad, false);
 });
 
 test("country and installation assets are lazy and comparison assets use one gate", () => {
   const venezuela = country("Venezuela");
   const guyana = special().items[0];
-  assert.equal(shouldLoadSectionLayers("jwla-034-named-countries", {}, null), false);
+  assert.equal(shouldLoadSectionLayers("jwla-034-named-countries", {}, null), true);
   assert.equal(shouldLoadSectionLayers("jwla-034-named-countries", {}, venezuela.layerKeys[0]), true);
-  assert.equal(shouldLoadInstallationLayers({}, null), false);
-  assert.equal(shouldLoadInstallationLayers({}, venezuela.layerKeys[2]), true);
+  assert.equal(shouldLoadInstallationLayers({}, null), true);
+  assert.equal(shouldLoadInstallationLayers({}, venezuela.layerKeys[1]), true);
   assert.equal(shouldLoadInstallationLayers(applyItemVisibility({}, guyana, true), null), true);
   const migrated = migrateRiskAreaSettings({ "JWC War Risk Zone - Persian Gulf": { visible: true } });
   assert.equal(isComparisonModeEnabled(migrated), false);
@@ -129,16 +145,16 @@ test("RestrictedZone does not load implementation-status groups and gates JWLA-0
   assert.match(source, /planProvisionalCoastalLoadRequest/);
   assert.match(source, /shouldLoadInstallationLayers/);
   assert.match(source, /isComparisonModeEnabled/);
-  assert.match(source, /const shouldLoadAmendments = comparisonVisible/);
   assert.match(source, /const shouldLoadContractAlerts = comparisonVisible/);
-  assert.match(source, /shouldLoadSectionLayers\("jwla-034-named-countries"/);
+  assert.doesNotMatch(source, /COUNTRY_URL|visibleCountries|visibleAmendments/);
   assert.doesNotMatch(source, /planPrecisionReferenceLoadRequest/);
   assert.match(source, /geometryRole === "installation-context-only"/);
   assert.match(source, /fillOpacity: isInstallationContext \? 0/);
 });
 
-test("provisional output remains exact, display-only and aligned to named-country compound rows", () => {
+test("unreviewed source partition remains internal and all 22 current country coasts resolve", () => {
   const output = readGeoJSON("jwla-034-coastal-waters-provisional.geojson");
+  const reviewed = readGeoJSON("jwla-034-coastal-waters.geojson");
   const catalogKeys = new Set(countries().items.flatMap((areaItem) => areaItem.layerKeys));
   assert.equal(output.features.length, 18);
   assert.ok(output.features.every((feature) => catalogKeys.has(feature.properties?.name)));
@@ -148,19 +164,25 @@ test("provisional output remains exact, display-only and aligned to named-countr
   assert.ok(output.features.every((feature) => feature.properties?.manualReviewRequired === true));
   assert.ok(output.features.every((feature) => feature.properties?.contractAlertEligible === false));
   assert.ok(!output.features.some((feature) => ["ISR", "LBN"].includes(feature.id.split(":")[2])));
+  assert.deepEqual(
+    [...reviewed.features, ...output.features].map((feature) => feature.properties?.name).sort(),
+    [...catalogKeys].filter((key) => /Coastal Waters/.test(key)).sort(),
+  );
 });
 
-test("verified Syria and Russia 12NM references remain stable display-only features", () => {
+test("reviewed Syria and Russia plus existing Israel and Lebanon 12NM references remain current", () => {
   const reference = readGeoJSON("jwla-034-reference.geojson");
   const coastal = readGeoJSON("jwla-034-coastal-waters.geojson");
   assert.equal(reference.features.some((feature) => feature.properties?.scope === "named-country-coastal-waters"), false);
   assert.deepEqual(coastal.features.map((feature) => feature.id), [
     "jwla-034:coastal:SYR:12nm",
     "jwla-034:coastal:RUS:12nm",
+    "jwla-034:coastal:ISR:12nm-existing",
+    "jwla-034:coastal:LBN:12nm-existing",
   ]);
-  assert.deepEqual(coastal.features.map((feature) => feature.properties?.marineRegionsMrgid), [49096, 49031]);
+  assert.deepEqual(coastal.features.map((feature) => feature.properties?.marineRegionsMrgid), [49096, 49031, undefined, undefined]);
   assert.ok(coastal.features.every((feature) => feature.properties?.contractAlertEligible === false));
-  assert.ok(coastal.features.every((feature) => feature.properties?.geometryStatus === "reference-only"));
+  assert.ok(coastal.features.every((feature) => ["reference-only", "existing-baseline-reference"].includes(feature.properties?.geometryStatus)));
 });
 
 test("precision artifact remains auditable but is not an exposed map group", () => {
@@ -213,6 +235,18 @@ test("visibility migration preserves old child choices while introducing compari
   assert.equal(migrateRiskAreaSettings(migrated), migrated);
 });
 
+test("catalog v2 migrates the combined current layer into seven independently styled subregions", () => {
+  const combined = { visible: false, color: "#123456", opacity: 0.24 };
+  const migrated = migrateRiskAreaSettings({
+    __jwlaCatalogVersion: 2,
+    "JWLA 034 - Combined Middle East and Southern Red Sea Waters": combined,
+  });
+  assert.equal(migrated.__jwlaCatalogVersion, 3);
+  for (const areaItem of defined().items.filter(({ group }) => group === "Middle East & Southern Red Sea")) {
+    assert.deepEqual(migrated[areaItem.layerKeys[0]], combined);
+  }
+});
+
 test("IBF/ITF and IWL status data remain intact", () => {
   const crewItems = bySection("ibf-itf").items;
   assert.equal(crewItems.filter((areaItem) => areaItem.designationStatus === "active").length, 10);
@@ -230,7 +264,7 @@ test("catalog identifiers and layer keys are unique", () => {
   assert.equal(new Set(layerKeys).size, layerKeys.length);
 });
 
-test("compound country visibility updates land, 12NM and installation layers together", () => {
+test("compound country visibility updates 12NM and installation layers together", () => {
   const venezuela = country("Venezuela");
   const on = applyItemVisibility({}, venezuela, true);
   assert.equal(isItemVisible(on, venezuela), true);
@@ -290,10 +324,10 @@ test("JWLA-034 GeoJSON assets remain valid and amendment is only the northward d
   const coastal = readGeoJSON("jwla-034-coastal-waters.geojson");
   const countryAsset = readGeoJSON("jwla-034-countries.geojson");
   const amendments = readGeoJSON("jwla-034-amendments.geojson");
-  assert.equal(areas.features.length, 4);
+  assert.equal(areas.features.length, 10);
   assert.ok(areas.features.every((feature) => feature.properties?.scope === "defined-waters"));
   assert.ok(fs.statSync(publicPath("jwla-034-reference.geojson")).size < 2_100_000);
-  assert.equal(coastal.features.length, 2);
+  assert.equal(coastal.features.length, 4);
   assert.equal(countryAsset.features.length, 22);
   assert.equal(amendments.features.length, 1);
   const delta = featureByName(amendments, "JWLA 034 Amendment - Red Sea 18N to 25.5N");
@@ -306,7 +340,7 @@ test("JWLA-034 GeoJSON assets remain valid and amendment is only the northward d
 
 test("defined-water reference records amended Red Sea and Cabo includes Tanzania", () => {
   const areas = readGeoJSON("jwla-034-reference.geojson");
-  const main = featureByName(areas, "JWLA 034 - Combined Middle East and Southern Red Sea Waters");
+  const main = featureByName(areas, "JWLA 034 - Red Sea Added Area 18N to 25.5N");
   const cabo = featureByName(areas, "JWLA 034 - Cabo Delgado");
   assert.equal(main.properties?.redSeaNorthLimit, 25.5);
   assert.equal(main.properties?.excludesEgyptTerritorialWaters, true);
@@ -319,7 +353,7 @@ test("comparison defaults resolve hidden contract and amendment styling metadata
   assert.deepEqual(getLayerDefaults("JWC War Risk Zone - Persian Gulf"), {
     visible: false, color: "#ef4444", opacity: 0.08,
   });
-  assert.deepEqual(getLayerDefaults("JWLA 034 Amendment - Red Sea 18N to 25.5N"), {
-    visible: false, color: "#facc15", opacity: 0.22,
+  assert.deepEqual(getLayerDefaults("JWLA 034 - Red Sea Added Area 18N to 25.5N"), {
+    visible: true, color: "#facc15", opacity: 0.22,
   });
 });

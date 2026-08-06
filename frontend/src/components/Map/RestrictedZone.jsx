@@ -8,7 +8,6 @@ import {
   planDefinedWaterLoadRequest,
   planProvisionalCoastalLoadRequest,
   shouldLoadInstallationLayers,
-  shouldLoadSectionLayers,
 } from "../../riskAreas/riskAreaCatalog.js";
 import {
   featureCollectionKey,
@@ -16,8 +15,6 @@ import {
   visibleFeatureCollection,
 } from "./restrictedZoneData.js";
 
-const AMENDMENT_URL = "/risk-areas/jwla-034-amendments.geojson";
-const COUNTRY_URL = "/risk-areas/jwla-034-countries.geojson";
 const INSTALLATION_URL = "/risk-areas/jwla-034-installations.geojson";
 
 const CONTRACT_ALERT_URLS = [
@@ -48,16 +45,12 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   const [coastal, setCoastal] = useState(null);
   const [provisionalCoastal, setProvisionalCoastal] = useState(null);
 
-  const [amendments, setAmendments] = useState(null);
-  const [countries, setCountries] = useState(null);
   const [installations, setInstallations] = useState(null);
   const [contractAlerts, setContractAlerts] = useState(null);
   const areaRef = useRef(null);
   const coastalRef = useRef(null);
   const provisionalCoastalRef = useRef(null);
 
-  const amendmentRef = useRef(null);
-  const countryRef = useRef(null);
   const installationRef = useRef(null);
   const contractAlertRef = useRef(null);
 
@@ -88,7 +81,6 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     return () => controller.abort();
   }, [definedWaterLoadPlan.shouldRequest, definedWaterRequestUrl]);
 
-  const shouldLoadCountries = shouldLoadSectionLayers("jwla-034-named-countries", zoneSettings, focusArea?.key);
   const coastalLoadPlan = planCoastalLoadRequest({
     settings: zoneSettings,
     focusKey: focusArea?.key,
@@ -102,7 +94,6 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   });
   const provisionalCoastalRequestUrl = provisionalCoastalLoadPlan.urls[0];
   const comparisonVisible = isComparisonModeEnabled(zoneSettings);
-  const shouldLoadAmendments = comparisonVisible;
   const shouldLoadInstallations = shouldLoadInstallationLayers(zoneSettings, focusArea?.key);
   const shouldLoadContractAlerts = comparisonVisible;
 
@@ -138,38 +129,6 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     return () => controller.abort();
   }, [provisionalCoastalLoadPlan.shouldRequest, provisionalCoastalRequestUrl]);
 
-
-  useEffect(() => {
-    if (!shouldLoadAmendments || amendments) return undefined;
-    const controller = new AbortController();
-    const loadAmendments = async () => {
-      try {
-        const response = await fetch(AMENDMENT_URL, { signal: controller.signal });
-        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        setAmendments(await response.json());
-      } catch (error) {
-        if (error.name !== "AbortError") console.error("JWLA-034 amendment load error:", error);
-      }
-    };
-    loadAmendments();
-    return () => controller.abort();
-  }, [shouldLoadAmendments, amendments]);
-
-  useEffect(() => {
-    if (!shouldLoadCountries || countries) return undefined;
-    const controller = new AbortController();
-    const loadCountries = async () => {
-      try {
-        const response = await fetch(COUNTRY_URL, { signal: controller.signal });
-        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        setCountries(await response.json());
-      } catch (error) {
-        if (error.name !== "AbortError") console.error("JWLA-034 country reference load error:", error);
-      }
-    };
-    loadCountries();
-    return () => controller.abort();
-  }, [shouldLoadCountries, countries]);
 
   useEffect(() => {
     if (!shouldLoadInstallations || installations) return undefined;
@@ -253,10 +212,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     () => visibleFeatureCollection(contractAlerts, getSetting),
     [contractAlerts, getSetting],
   );
-  const visibleCountries = useMemo(
-    () => visibleFeatureCollection(countries, getSetting),
-    [countries, getSetting],
-  );
+
   const visibleInstallations = useMemo(
     () => visibleFeatureCollection(installations, getSetting),
     [installations, getSetting],
@@ -273,28 +229,23 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     () => visibleFeatureCollection(provisionalCoastal, getSetting),
     [provisionalCoastal, getSetting],
   );
-  const visibleAmendments = useMemo(
-    () => visibleFeatureCollection(amendments, getSetting),
-    [amendments, getSetting],
-  );
+
 
   useEffect(() => {
     areaRef.current?.setStyle(getStyle);
     coastalRef.current?.setStyle(getStyle);
     provisionalCoastalRef.current?.setStyle(getStyle);
 
-    amendmentRef.current?.setStyle(getStyle);
-    countryRef.current?.setStyle(getStyle);
     installationRef.current?.setStyle(getStyle);
     contractAlertRef.current?.setStyle(getStyle);
   }, [zoneSettings, getStyle]);
 
   useEffect(() => {
     if (!focusArea?.key) return;
-    const feature = featureByName([areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts], focusArea.key);
+    const feature = featureByName([areas, coastal, provisionalCoastal, installations, contractAlerts], focusArea.key);
     const bounds = getFeatureBounds(feature);
     if (bounds) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 7, animate: true });
-  }, [focusArea, areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts, map]);
+  }, [focusArea, areas, coastal, provisionalCoastal, installations, contractAlerts, map]);
 
   return (
     <>
@@ -307,15 +258,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
           onEachFeature={onEachFeature}
         />
       )}
-      {visibleCountries?.features.length > 0 && (
-        <GeoJSON
-          ref={countryRef}
-          key={featureCollectionKey("jwla034-countries", visibleCountries)}
-          data={visibleCountries}
-          style={getStyle}
-          onEachFeature={onEachFeature}
-        />
-      )}
+
       {visibleInstallations?.features.length > 0 && (
         <GeoJSON
           ref={installationRef}
@@ -352,15 +295,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
           onEachFeature={onEachFeature}
         />
       )}
-      {visibleAmendments?.features.length > 0 && (
-        <GeoJSON
-          ref={amendmentRef}
-          key={featureCollectionKey("jwla034-amendments", visibleAmendments)}
-          data={visibleAmendments}
-          style={getStyle}
-          onEachFeature={onEachFeature}
-        />
-      )}
+
     </>
   );
 }

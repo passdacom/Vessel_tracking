@@ -294,22 +294,37 @@ function buildAmendedRedSea(countries) {
   return difference(redSeaSouthOf255, egyptTerritorialInRedSea, "Red Sea excluding Egypt reference waters");
 }
 
-function buildCombinedWaters(countries) {
+function buildCurrentMiddleEastWaters(countries) {
   const legacy = readJson("frontend/public/war-risk-zone.geojson");
-  const oldRedSeaName = "JWC War Risk Zone - Red Sea (S of 18N)";
-  const retained = legacy.features.filter((feature) => feature.properties?.name !== oldRedSeaName);
-  if (retained.length !== 5) throw new Error(`Expected five retained main-water features, got ${retained.length}`);
-
-  const amendedRedSea = buildAmendedRedSea(countries);
-  const combined = union([...retained, amendedRedSea], "JWLA-034 combined waters");
-  return withMetadata(combined, "JWLA 034 - Combined Middle East and Southern Red Sea Waters", {
-    stableId: "jwla-034:defined-waters:combined-middle-east-southern-red-sea",
+  const specs = [
+    ["JWC War Risk Zone - Persian Gulf", "JWLA 034 - Persian Gulf", "persian-gulf"],
+    ["JWC War Risk Zone - Gulf of Oman", "JWLA 034 - Gulf of Oman", "gulf-of-oman"],
+    ["JWC War Risk Zone - Gulf of Aden", "JWLA 034 - Gulf of Aden", "gulf-of-aden"],
+    ["JWC War Risk Zone - Red Sea (S of 18N)", "JWLA 034 - Red Sea south of 18N", "red-sea-south-of-18n"],
+    ["JWC War Risk Zone - Arabian Sea (JWC West)", "JWLA 034 - Arabian Sea JWC West", "arabian-sea-jwc-west"],
+    ["JWC War Risk Zone - Indian Ocean (JWC North-West)", "JWLA 034 - Indian Ocean JWC North-West", "indian-ocean-jwc-north-west"],
+  ];
+  const current = specs.map(([sourceName, targetName, stableSuffix]) => copyArea(legacy, sourceName, targetName, {
+    stableId: `jwla-034:defined-waters:${stableSuffix}`,
     scope: "defined-waters",
     officialCategory: "Defined Waters",
+    parentDefinedWater: "Middle East & Southern Red Sea",
+  }));
+
+  const addedArea = buildAmendments(countries).features[0];
+  current.splice(4, 0, withMetadata(addedArea, "JWLA 034 - Red Sea Added Area 18N to 25.5N", {
+    stableId: "jwla-034:defined-waters:red-sea-added-area-18n-to-25-5n",
+    scope: "defined-waters",
+    officialCategory: "Defined Waters",
+    parentDefinedWater: "Middle East & Southern Red Sea",
+    changeType: "northward-extension",
+    previousCircular: "JWLA-033",
+    southLimit: 18,
     redSeaNorthLimit: 25.5,
     excludesEgyptTerritorialWaters: true,
     geometryStatus: "approximate-reference",
-  });
+  }));
+  return current;
 }
 
 function buildAmendments(countries) {
@@ -360,6 +375,7 @@ function buildCaboDelgado(countries) {
     stableId: "jwla-034:defined-waters:cabo-delgado",
     scope: "defined-waters",
     officialCategory: "Defined Waters",
+    parentDefinedWater: "Cabo Delgado",
     includesTerritorialSeas: ["Mozambique", "Tanzania"],
     geometryStatus: "approximate-reference",
   });
@@ -377,7 +393,7 @@ function buildCoastalReferences(coastal) {
     [49096, "Syria"],
     [49031, "Russia"],
   ]);
-  return coastal.source.features.map((feature) => {
+  const reviewed = coastal.source.features.map((feature) => {
     const mrgid = feature.properties.mrgid;
     const iso3 = feature.properties.iso_ter1;
     const countryName = labels.get(mrgid);
@@ -401,6 +417,30 @@ function buildCoastalReferences(coastal) {
       derivedStatus: "derived-display-reference",
     });
   });
+  const existing = readJson("frontend/public/12nm_bounds.geojson");
+  const existingSpecs = [
+    ["Israel 12NM Territorial Waters", "Israel", "ISR"],
+    ["Lebanon 12NM Territorial Waters", "Lebanon", "LBN"],
+  ];
+  return [
+    ...reviewed,
+    ...existingSpecs.map(([sourceName, countryName, iso3]) => copyArea(
+      existing,
+      sourceName,
+      `JWLA 034 Coastal Waters - ${countryName} 12NM`,
+      {
+        stableId: `jwla-034:coastal:${iso3}:12nm-existing`,
+        scope: "named-country-coastal-waters",
+        officialCategory: "Named Country coastal waters",
+        monitoringMode: "reference-only",
+        geometryStatus: "existing-baseline-reference",
+        geometrySource: "existing backend 12nm_bounds.geojson input",
+        sourceFile: "frontend/public/12nm_bounds.geojson",
+        subsetStatus: "existing-baseline-input",
+        derivedStatus: "current-display-reference",
+      },
+    )),
+  ];
 }
 
 function buildProvisionalCoastalReferences(coastal) {
@@ -486,12 +526,14 @@ function buildPrecisionReferences(precision) {
 function buildAreas(countries) {
   const global = readJson("frontend/public/war-risk-zone-global.geojson");
   return turf.featureCollection([
-    buildCombinedWaters(countries),
+    ...buildCurrentMiddleEastWaters(countries),
     copyArea(global, "JWLA 033 - Black Sea & Sea of Azov", "JWLA 034 - Black Sea & Sea of Azov", {
       stableId: "jwla-034:defined-waters:black-sea-azov", scope: "defined-waters", officialCategory: "Defined Waters",
+      parentDefinedWater: "Black Sea & Sea of Azov",
     }),
     copyArea(global, "JWLA 033 - Gulf of Guinea", "JWLA 034 - Gulf of Guinea", {
       stableId: "jwla-034:defined-waters:gulf-of-guinea", scope: "defined-waters", officialCategory: "Defined Waters",
+      parentDefinedWater: "Gulf of Guinea",
     }),
     buildCaboDelgado(countries),
     copyArea(global, "JWLA 033 - Guyana (Offshore EEZ)", "JWLA 034 - Guyana Offshore Installation Reference", {
@@ -831,8 +873,8 @@ function main() {
   const areas = turf.featureCollection(
     allAreaReferences.features.filter((feature) => feature.properties?.scope === "defined-waters"),
   );
-  if (areas.features.length !== 4) {
-    throw new Error(`Expected 4 JWLA-034 defined-water features, found ${areas.features.length}`);
+  if (areas.features.length !== 10) {
+    throw new Error(`Expected 10 styleable JWLA-034 defined-water features, found ${areas.features.length}`);
   }
   console.log("Validating JWLA-034 area reference structure...");
   assertWellFormed(areas, "areas");

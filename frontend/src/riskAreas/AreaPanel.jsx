@@ -5,6 +5,7 @@ import {
   applyItemVisibility,
   applySectionAppearance,
   getCalendarStatus,
+  groupSectionItems,
   getLayerDefaults,
   isComparisonModeEnabled,
   isItemVisible,
@@ -157,7 +158,14 @@ export default function AreaPanel({
               </div>
             )}
             <div className="space-y-0.5 px-1.5 pb-2">
-              {section.items.map((areaItem) => {
+              {groupSectionItems(section).map((itemGroup) => (
+                <React.Fragment key={`${section.id}-${itemGroup.label}`}>
+                  {section.id === "jwla-034-defined-waters" && (
+                    <div className="px-2 pb-1 pt-2 text-[9px] font-bold uppercase tracking-wide text-gray-400">
+                      {itemGroup.label}
+                    </div>
+                  )}
+                  {itemGroup.items.map((areaItem) => {
                 const ready = areaItem.dataStatus === "ready" && areaItem.layerKeys.length > 0;
                 const visible = isItemVisible(zoneSettings, areaItem);
                 const firstKey = areaItem.layerKeys[0];
@@ -248,7 +256,9 @@ export default function AreaPanel({
                     )}
                   </div>
                 );
-              })}
+                  })}
+                </React.Fragment>
+              ))}
             </div>
           </div>
         )}
@@ -311,7 +321,7 @@ export default function AreaPanel({
                   <div className="mb-2 flex items-center justify-between gap-3 rounded-lg border border-yellow-900/70 bg-yellow-950/20 px-3 py-2">
                     <span className="min-w-0">
                       <span className="block text-[10px] font-semibold text-yellow-200">JWLA-033과 비교</span>
-                      <span className="block text-[8px] leading-3 text-gray-500">backend baseline 22개와 JWLA-034 변경분을 함께 표시</span>
+                      <span className="block text-[8px] leading-3 text-gray-500">JWLA-034 current는 유지하고 backend JWLA-033 baseline만 중첩 표시</span>
                     </span>
                     <button
                       type="button"

@@ -43,7 +43,7 @@ function fixtureCopy(tempRoot) {
   fs.copyFileSync(path.join(backendDir, "generate_jwla034_reference.mjs"), path.join(tempBackend, "generate_jwla034_reference.mjs"));
   fs.copyFileSync(scriptPath, path.join(tempBackend, "scripts", path.basename(scriptPath)));
   for (const name of ["countries.geojson", "iho_red_sea.geojson"]) fs.copyFileSync(path.join(backendDir, name), path.join(tempBackend, name));
-  for (const name of ["war-risk-zone.geojson", "war-risk-zone-global.geojson"]) fs.copyFileSync(path.join(rootDir, "frontend", "public", name), path.join(tempPublic, name));
+  for (const name of ["war-risk-zone.geojson", "war-risk-zone-global.geojson", "12nm_bounds.geojson"]) fs.copyFileSync(path.join(rootDir, "frontend", "public", name), path.join(tempPublic, name));
   for (const name of fs.readdirSync(referenceDir)) fs.copyFileSync(path.join(referenceDir, name), path.join(tempReference, name));
   fs.symlinkSync(path.join(backendDir, "node_modules"), path.join(tempBackend, "node_modules"), "dir");
   return { tempBackend, tempReference, tempOutput };

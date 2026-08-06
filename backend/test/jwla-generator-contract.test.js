@@ -144,7 +144,7 @@ test("JWLA-034 generator fails closed without replacing outputs when pinned coas
     for (const name of ["countries.geojson", "iho_red_sea.geojson"]) {
       fs.copyFileSync(path.join(backendDir, name), path.join(tempBackend, name));
     }
-    for (const name of ["war-risk-zone.geojson", "war-risk-zone-global.geojson"]) {
+    for (const name of ["war-risk-zone.geojson", "war-risk-zone-global.geojson", "12nm_bounds.geojson"]) {
       fs.copyFileSync(path.join(rootDir, "frontend", "public", name), path.join(tempPublic, name));
     }
     for (const name of [coastalSourceName, coastalManifestName, provisionalSourceName, provisionalManifestName, ...precisionInputNames]) {
@@ -180,7 +180,7 @@ function copyGeneratorFixture(tempRoot) {
   fs.mkdirSync(tempOutput, { recursive: true });
   fs.copyFileSync(path.join(backendDir, "generate_jwla034_reference.mjs"), path.join(tempBackend, "generate_jwla034_reference.mjs"));
   for (const name of ["countries.geojson", "iho_red_sea.geojson"]) fs.copyFileSync(path.join(backendDir, name), path.join(tempBackend, name));
-  for (const name of ["war-risk-zone.geojson", "war-risk-zone-global.geojson"]) fs.copyFileSync(path.join(rootDir, "frontend", "public", name), path.join(tempPublic, name));
+  for (const name of ["war-risk-zone.geojson", "war-risk-zone-global.geojson", "12nm_bounds.geojson"]) fs.copyFileSync(path.join(rootDir, "frontend", "public", name), path.join(tempPublic, name));
   for (const name of [coastalSourceName, coastalManifestName, provisionalSourceName, provisionalManifestName, ...precisionInputNames]) fs.copyFileSync(path.join(backendDir, "reference-data", name), path.join(tempReferenceData, name));
   fs.symlinkSync(path.join(backendDir, "node_modules"), path.join(tempBackend, "node_modules"), "dir");
   return { tempBackend, tempOutput };
@@ -463,11 +463,12 @@ test("generated coastal asset preserves the exact reviewed geometry and bounded 
   const generated = JSON.parse(generatedBytes);
   assert.equal(sha256(sourceBytes), expectedCoastalSha256);
   assert.equal(generated.type, "FeatureCollection");
-  assert.equal(generated.features.length, 2);
-  assert.deepEqual(generated.features.map((feature) => feature.geometry), source.features.map((feature) => feature.geometry));
-  assert.deepEqual(generated.features.map((feature) => feature.geometry.type), ["MultiPolygon", "MultiPolygon"]);
-  assert.deepEqual(generated.features.map((feature) => coordinateCount(feature.geometry)), [824, 136129]);
-  assert.deepEqual(generated.features.map((feature) => geometryBounds(feature.geometry)), [
+  assert.equal(generated.features.length, 4);
+  const reviewed = generated.features.slice(0, 2);
+  assert.deepEqual(reviewed.map((feature) => feature.geometry), source.features.map((feature) => feature.geometry));
+  assert.deepEqual(reviewed.map((feature) => feature.geometry.type), ["MultiPolygon", "MultiPolygon"]);
+  assert.deepEqual(reviewed.map((feature) => coordinateCount(feature.geometry)), [824, 136129]);
+  assert.deepEqual(reviewed.map((feature) => geometryBounds(feature.geometry)), [
     [35.47134643, 34.59925086, 35.97254309, 36.03456464],
     [-180, 41.84196511, 180, 82.05827656],
   ]);
@@ -479,7 +480,7 @@ test("generated coastal asset preserves the exact reviewed geometry and bounded 
   ]) assert.ok(russianPolygonBounds.some(([minX, minY, maxX, maxY]) => minX <= fixture[2] && maxX >= fixture[0] && minY <= fixture[3] && maxY >= fixture[1]), `${label} representative basin extent is missing`);
   assert.ok(generatedBytes.length <= 6_500_000, `coastal asset exceeds byte budget: ${generatedBytes.length}`);
   assert.ok(generated.features.reduce((sum, feature) => sum + coordinateCount(feature.geometry), 0) <= 235_000);
-  for (const feature of generated.features) {
+  for (const feature of reviewed) {
     assert.equal(feature.properties.hashAlgorithm, "SHA-256");
     assert.equal(feature.properties.sourceDocumentSha256, "125e507bbd187051315bdf80ae30583bc92ec9ad2d280d02fac2d10a019d03b9");
     assert.equal(feature.properties.sourceArtifactSha256, expectedCoastalSha256);
@@ -491,6 +492,9 @@ test("generated coastal asset preserves the exact reviewed geometry and bounded 
     assert.equal(feature.properties.subsetStatus, "reviewed-subset");
     assert.equal(feature.properties.derivedStatus, "derived-display-reference");
   }
+  assert.deepEqual(generated.features.slice(2).map((feature) => feature.properties.geometryStatus), [
+    "existing-baseline-reference", "existing-baseline-reference",
+  ]);
 });
 
 test("Python coastal retrieval atomically fsyncs with unique temporary cleanup on success and replace failure", () => {

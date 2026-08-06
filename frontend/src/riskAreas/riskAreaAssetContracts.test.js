@@ -4,7 +4,6 @@ import fs from "node:fs";
 import * as turf from "@turf/turf";
 import {
   JWLA_REFERENCE,
-  JWC_034_PRECISION_REFERENCES,
   buildFeaturePopupContent,
   getComparisonLayerKeys,
 } from "./riskAreaCatalog.js";
@@ -59,6 +58,21 @@ test("JWLA-034 amendment remains only the exact 18N to 25.5N northward delta", (
   assert.equal(turf.booleanPointInPolygon(turf.point([40.0, 17.0]), delta), false);
 });
 
+test("seven styleable Middle East layers preserve the prior combined current footprint", () => {
+  const current = read(riskFile("jwla-034-reference.geojson"));
+  const legacy = read(publicFile("war-risk-zone.geojson"));
+  const amendment = read(riskFile("jwla-034-amendments.geojson")).features[0];
+  const parts = current.features.filter((feature) => feature.properties?.parentDefinedWater === "Middle East & Southern Red Sea");
+  assert.equal(parts.length, 7);
+
+  const actual = turf.union(turf.featureCollection(parts));
+  const expected = turf.union(turf.featureCollection([...legacy.features, amendment]));
+  const expectedMinusActual = turf.difference(turf.featureCollection([expected, actual]));
+  const actualMinusExpected = turf.difference(turf.featureCollection([actual, expected]));
+  assert.ok((expectedMinusActual ? turf.area(expectedMinusActual) : 0) < 1);
+  assert.ok((actualMinusExpected ? turf.area(actualMinusExpected) : 0) < 1);
+});
+
 test("comparison catalog exactly matches the three backend geofence inputs", () => {
   const filenames = ["war-risk-zone.geojson", "12nm_bounds.geojson", "war-risk-zone-global.geojson"];
   const backendSource = fs.readFileSync(new URL("../../../backend/src/services/geofenceChecker.js", import.meta.url), "utf8");
@@ -100,15 +114,18 @@ test("Venezuela and Guyana source EEZs and display assets stay manual installati
   }
 });
 
-test("precision artifact remains exact and auditable while integrated as item status", () => {
+test("precision experiment remains audit-only and disconnected from the runtime catalog", () => {
   const output = read(riskFile("jwla-034-precision-references.geojson"));
-  const ready = JWC_034_PRECISION_REFERENCES.filter(({ dataStatus }) => dataStatus === "ready");
   assert.deepEqual(output.features.map(({ id }) => id), [
     "jwla-034:precision:black-sea-azov-marine",
     "jwla-034:precision:gulf-of-guinea-water",
     "jwla-034:precision:iran-caspian-12nm",
   ]);
-  assert.deepEqual(output.features.map((feature) => feature.properties?.name), ready.map((item) => item.layerKeys[0]));
+  assert.deepEqual(output.features.map((feature) => feature.properties?.name), [
+    "JWLA 034 Precision Reference - Black Sea and Sea of Azov Marine Waters",
+    "JWLA 034 Precision Reference - Gulf of Guinea Water Only",
+    "JWLA 034 Precision Reference - Iran Caspian 12NM Provisional",
+  ]);
   assert.ok(output.features.every((feature) => feature.properties?.mapKind === "precision-reference-display-only"));
   assert.ok(output.features.every((feature) => feature.properties?.reviewStatus === "manual-review-display-only"));
   assert.ok(output.features.every((feature) => feature.properties?.manualReviewRequired === true));
