@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "node --watch --import dotenv/config src/index.js",
     "start": "node --import dotenv/config src/index.js",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

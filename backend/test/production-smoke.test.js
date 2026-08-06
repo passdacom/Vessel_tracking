@@ -168,6 +168,11 @@ test("production smoke rejects malformed, non-http, and credentialed BASE_URL va
   }
 });
 
+test("backend test command serializes timing-sensitive production smoke gates", () => {
+  const packageJson = JSON.parse(readFileSync(resolve(root, "backend/package.json"), "utf8"));
+  assert.match(packageJson.scripts.test, /--test-concurrency=1/);
+});
+
 test("production smoke terminates a hanging OpenSSL network gate within the gate deadline", () => {
   const fixture = makeSmokeFixture({ hangOpenSsl: true });
   try {
