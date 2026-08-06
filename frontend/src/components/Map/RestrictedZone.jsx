@@ -1,21 +1,25 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GeoJSON, useMap } from "react-leaflet";
 import {
   buildFeaturePopupContent,
   getFeatureBounds,
-  getLayerDefaults,
+  isComparisonModeEnabled,
   planCoastalLoadRequest,
-  planPrecisionReferenceLoadRequest,
+  planDefinedWaterLoadRequest,
   planProvisionalCoastalLoadRequest,
+  shouldLoadInstallationLayers,
   shouldLoadSectionLayers,
 } from "../../riskAreas/riskAreaCatalog.js";
-
-const AREA_URL = "/risk-areas/jwla-034-reference.geojson";
+import {
+  featureCollectionKey,
+  resolveFeatureSetting,
+  visibleFeatureCollection,
+} from "./restrictedZoneData.js";
 
 const AMENDMENT_URL = "/risk-areas/jwla-034-amendments.geojson";
 const COUNTRY_URL = "/risk-areas/jwla-034-countries.geojson";
 const INSTALLATION_URL = "/risk-areas/jwla-034-installations.geojson";
-const CURRENT_REFERENCE_SCOPES = new Set(["defined-waters"]);
+
 const CONTRACT_ALERT_URLS = [
   "/war-risk-zone.geojson",
   "/12nm_bounds.geojson",
@@ -31,6 +35,7 @@ function featureByName(collections, name) {
   return null;
 }
 
+
 /**
  * Current JWLA-034 informational reference with optional version/backend layers.
  *
@@ -42,7 +47,7 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   const [areas, setAreas] = useState(null);
   const [coastal, setCoastal] = useState(null);
   const [provisionalCoastal, setProvisionalCoastal] = useState(null);
-  const [precisionReferences, setPrecisionReferences] = useState(null);
+
   const [amendments, setAmendments] = useState(null);
   const [countries, setCountries] = useState(null);
   const [installations, setInstallations] = useState(null);
@@ -50,22 +55,30 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
   const areaRef = useRef(null);
   const coastalRef = useRef(null);
   const provisionalCoastalRef = useRef(null);
-  const precisionRef = useRef(null);
+
   const amendmentRef = useRef(null);
   const countryRef = useRef(null);
   const installationRef = useRef(null);
   const contractAlertRef = useRef(null);
 
+  const definedWaterLoadPlan = planDefinedWaterLoadRequest({
+    settings: zoneSettings,
+    focusKey: focusArea?.key,
+    loaded: Boolean(areas),
+  });
+  const definedWaterRequestUrl = definedWaterLoadPlan.urls[0];
+
   useEffect(() => {
+    if (!definedWaterLoadPlan.shouldRequest || !definedWaterRequestUrl) return undefined;
     const controller = new AbortController();
     const loadAreas = async () => {
       try {
-        const response = await fetch(AREA_URL, { signal: controller.signal });
+        const response = await fetch(definedWaterRequestUrl, { signal: controller.signal });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const collection = await response.json();
         setAreas({
           ...collection,
-          features: (collection.features || []).filter((feature) => CURRENT_REFERENCE_SCOPES.has(feature.properties?.scope)),
+          features: (collection.features || []).filter((feature) => feature.properties?.scope === "defined-waters"),
         });
       } catch (error) {
         if (error.name !== "AbortError") console.error("JWLA-034 current reference load error:", error);
@@ -73,9 +86,9 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     };
     loadAreas();
     return () => controller.abort();
-  }, []);
+  }, [definedWaterLoadPlan.shouldRequest, definedWaterRequestUrl]);
 
-  const shouldLoadCountries = shouldLoadSectionLayers("jwc-countries", zoneSettings, focusArea?.key);
+  const shouldLoadCountries = shouldLoadSectionLayers("jwla-034-named-countries", zoneSettings, focusArea?.key);
   const coastalLoadPlan = planCoastalLoadRequest({
     settings: zoneSettings,
     focusKey: focusArea?.key,
@@ -88,15 +101,10 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     loaded: Boolean(provisionalCoastal),
   });
   const provisionalCoastalRequestUrl = provisionalCoastalLoadPlan.urls[0];
-  const precisionLoadPlan = planPrecisionReferenceLoadRequest({
-    settings: zoneSettings,
-    focusKey: focusArea?.key,
-    loaded: Boolean(precisionReferences),
-  });
-  const precisionRequestUrl = precisionLoadPlan.urls[0];
-  const shouldLoadAmendments = shouldLoadSectionLayers("jwc-034-amendment", zoneSettings, focusArea?.key);
-  const shouldLoadInstallations = shouldLoadSectionLayers("jwc-installations", zoneSettings, focusArea?.key);
-  const shouldLoadContractAlerts = shouldLoadSectionLayers("contract-alerts", zoneSettings, focusArea?.key);
+  const comparisonVisible = isComparisonModeEnabled(zoneSettings);
+  const shouldLoadAmendments = comparisonVisible;
+  const shouldLoadInstallations = shouldLoadInstallationLayers(zoneSettings, focusArea?.key);
+  const shouldLoadContractAlerts = comparisonVisible;
 
   useEffect(() => {
     if (!coastalLoadPlan.shouldRequest || !coastalRequestUrl) return undefined;
@@ -130,21 +138,6 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     return () => controller.abort();
   }, [provisionalCoastalLoadPlan.shouldRequest, provisionalCoastalRequestUrl]);
 
-  useEffect(() => {
-    if (!precisionLoadPlan.shouldRequest || !precisionRequestUrl) return undefined;
-    const controller = new AbortController();
-    const loadPrecisionReferences = async () => {
-      try {
-        const response = await fetch(precisionRequestUrl, { signal: controller.signal });
-        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        setPrecisionReferences(await response.json());
-      } catch (error) {
-        if (error.name !== "AbortError") console.error("JWLA-034 precision reference load error:", error);
-      }
-    };
-    loadPrecisionReferences();
-    return () => controller.abort();
-  }, [precisionLoadPlan.shouldRequest, precisionRequestUrl]);
 
   useEffect(() => {
     if (!shouldLoadAmendments || amendments) return undefined;
@@ -225,14 +218,12 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     return () => controller.abort();
   }, [shouldLoadContractAlerts, contractAlerts]);
 
-  const getSetting = useCallback((name) => ({
-    ...getLayerDefaults(name),
-    ...zoneSettings[name],
-  }), [zoneSettings]);
+  const getSetting = useCallback((feature) => (
+    resolveFeatureSetting(zoneSettings, feature)
+  ), [zoneSettings]);
 
   const getStyle = useCallback((feature) => {
-    const name = feature.properties?.name;
-    const setting = getSetting(name);
+    const setting = getSetting(feature);
     if (!setting.visible) return { opacity: 0, fillOpacity: 0, weight: 0, interactive: false };
     const isReferenceOnly = feature.properties?.monitoringMode === "reference-only";
     const isContractAlert = feature.properties?.monitoringMode === "backend-geofence";
@@ -258,11 +249,40 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
     layer.bindPopup(buildFeaturePopupContent(feature), { maxWidth: 360 });
   }, []);
 
+  const visibleContractAlerts = useMemo(
+    () => visibleFeatureCollection(contractAlerts, getSetting),
+    [contractAlerts, getSetting],
+  );
+  const visibleCountries = useMemo(
+    () => visibleFeatureCollection(countries, getSetting),
+    [countries, getSetting],
+  );
+  const visibleInstallations = useMemo(
+    () => visibleFeatureCollection(installations, getSetting),
+    [installations, getSetting],
+  );
+  const visibleAreas = useMemo(
+    () => visibleFeatureCollection(areas, getSetting),
+    [areas, getSetting],
+  );
+  const visibleCoastal = useMemo(
+    () => visibleFeatureCollection(coastal, getSetting),
+    [coastal, getSetting],
+  );
+  const visibleProvisionalCoastal = useMemo(
+    () => visibleFeatureCollection(provisionalCoastal, getSetting),
+    [provisionalCoastal, getSetting],
+  );
+  const visibleAmendments = useMemo(
+    () => visibleFeatureCollection(amendments, getSetting),
+    [amendments, getSetting],
+  );
+
   useEffect(() => {
     areaRef.current?.setStyle(getStyle);
     coastalRef.current?.setStyle(getStyle);
     provisionalCoastalRef.current?.setStyle(getStyle);
-    precisionRef.current?.setStyle(getStyle);
+
     amendmentRef.current?.setStyle(getStyle);
     countryRef.current?.setStyle(getStyle);
     installationRef.current?.setStyle(getStyle);
@@ -271,81 +291,72 @@ export default function RestrictedZone({ zoneSettings = {}, focusArea }) {
 
   useEffect(() => {
     if (!focusArea?.key) return;
-    const feature = featureByName([areas, coastal, provisionalCoastal, precisionReferences, amendments, countries, installations, contractAlerts], focusArea.key);
+    const feature = featureByName([areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts], focusArea.key);
     const bounds = getFeatureBounds(feature);
     if (bounds) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 7, animate: true });
-  }, [focusArea, areas, coastal, provisionalCoastal, precisionReferences, amendments, countries, installations, contractAlerts, map]);
+  }, [focusArea, areas, coastal, provisionalCoastal, amendments, countries, installations, contractAlerts, map]);
 
   return (
     <>
-      {contractAlerts && (
+      {visibleContractAlerts?.features.length > 0 && (
         <GeoJSON
           ref={contractAlertRef}
-          key={`contract-alerts-${contractAlerts.features?.length || 0}`}
-          data={contractAlerts}
+          key={featureCollectionKey("contract-alerts", visibleContractAlerts)}
+          data={visibleContractAlerts}
           style={getStyle}
           onEachFeature={onEachFeature}
         />
       )}
-      {countries && (
+      {visibleCountries?.features.length > 0 && (
         <GeoJSON
           ref={countryRef}
-          key={`jwla034-countries-${countries.features?.length || 0}`}
-          data={countries}
+          key={featureCollectionKey("jwla034-countries", visibleCountries)}
+          data={visibleCountries}
           style={getStyle}
           onEachFeature={onEachFeature}
         />
       )}
-      {installations && (
+      {visibleInstallations?.features.length > 0 && (
         <GeoJSON
           ref={installationRef}
-          key={`jwla034-installations-${installations.features?.length || 0}`}
-          data={installations}
+          key={featureCollectionKey("jwla034-installations", visibleInstallations)}
+          data={visibleInstallations}
           style={getStyle}
           onEachFeature={onEachFeature}
         />
       )}
-      {areas && (
+      {visibleAreas?.features.length > 0 && (
         <GeoJSON
           ref={areaRef}
-          key={`jwla034-current-${areas.features?.length || 0}`}
-          data={areas}
+          key={featureCollectionKey("jwla034-current", visibleAreas)}
+          data={visibleAreas}
           style={getStyle}
           onEachFeature={onEachFeature}
         />
       )}
-      {coastal && (
+      {visibleCoastal?.features.length > 0 && (
         <GeoJSON
           ref={coastalRef}
-          key={`jwla034-coastal-${coastal.features?.length || 0}`}
-          data={coastal}
+          key={featureCollectionKey("jwla034-coastal", visibleCoastal)}
+          data={visibleCoastal}
           style={getStyle}
           onEachFeature={onEachFeature}
         />
       )}
-      {provisionalCoastal && (
+      {visibleProvisionalCoastal?.features.length > 0 && (
         <GeoJSON
           ref={provisionalCoastalRef}
-          key={`jwla034-provisional-coastal-${provisionalCoastal.features?.length || 0}`}
-          data={provisionalCoastal}
+          key={featureCollectionKey("jwla034-provisional-coastal", visibleProvisionalCoastal)}
+          data={visibleProvisionalCoastal}
           style={getStyle}
           onEachFeature={onEachFeature}
         />
       )}
-      {precisionReferences && (
-        <GeoJSON
-          ref={precisionRef}
-          key={`jwla034-precision-${precisionReferences.features?.length || 0}`}
-          data={precisionReferences}
-          style={getStyle}
-          onEachFeature={onEachFeature}
-        />
-      )}
-      {amendments && (
+      {visibleAmendments?.features.length > 0 && (
         <GeoJSON
           ref={amendmentRef}
-          key={`jwla034-amendments-${amendments.features?.length || 0}`}
-          data={amendments}
+          key={featureCollectionKey("jwla034-amendments", visibleAmendments)}
+          data={visibleAmendments}
           style={getStyle}
           onEachFeature={onEachFeature}
         />

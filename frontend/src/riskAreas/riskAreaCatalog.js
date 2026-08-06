@@ -12,14 +12,15 @@ const JWC_SOURCE = JWLA_REFERENCE.sourceUrl;
 const IBF_SOURCE = "https://www.itfseafarers.org/en/resources/ibf-warlike-and-high-risk-areas";
 const ITF_SOURCE = "https://www.itfseafarers.org/en/resources/itf-warlike-and-high-risk-areas-0";
 const IWL_SOURCE = "https://jwla.ai/api/docs/IWL-1.7.76-CL26.pdf";
+const DEFINED_WATERS_URL = "/risk-areas/jwla-034-reference.geojson";
 const COASTAL_URL = "/risk-areas/jwla-034-coastal-waters.geojson";
 const PROVISIONAL_COASTAL_URL = "/risk-areas/jwla-034-coastal-waters-provisional.geojson";
-const PRECISION_REFERENCE_URL = "/risk-areas/jwla-034-precision-references.geojson";
 
 const item = ({
   id,
   label,
   layerKey,
+  layerKeys,
   badge,
   note,
   defaultVisible = false,
@@ -31,7 +32,7 @@ const item = ({
 }) => Object.freeze({
   id,
   label,
-  layerKeys: layerKey ? [layerKey] : [],
+  layerKeys: layerKeys || (layerKey ? [layerKey] : []),
   badge,
   note,
   defaultVisible,
@@ -42,18 +43,59 @@ const item = ({
   ...metadata,
 });
 
-const country = (id, label, group) => ({
-  ...item({
-    id: `jwc-country-${id}`,
-    label,
-    layerKey: `JWLA 034 Country - ${label}`,
-    badge: "12NM",
-    note: "Named Country reference outline. The listed scope is ports and coastal waters up to 12 nautical miles, not the whole land territory.",
-    color: "#f97316",
-    opacity: 0.04,
-  }),
-  group,
-});
+const VERIFIED_COASTAL_COUNTRIES = new Set(["russia", "syria"]);
+const WITHHELD_COASTAL_COUNTRIES = new Set(["israel", "lebanon"]);
+
+const country = (id, label, group) => {
+  const geometryStatus = VERIFIED_COASTAL_COUNTRIES.has(id)
+    ? "verified"
+    : WITHHELD_COASTAL_COUNTRIES.has(id)
+      ? "withheld"
+      : "provisional";
+  const coastalLayerKey = `JWLA 034 Coastal Waters - ${label} 12NM`;
+  const layerKeys = [`JWLA 034 Country - ${label}`];
+  if (geometryStatus !== "withheld") layerKeys.push(coastalLayerKey);
+  if (id === "venezuela") layerKeys.push("JWLA 034 - Venezuela Offshore Installation Reference");
+
+  let note;
+  if (id === "venezuela") {
+    note = "JWLA-034 named-country scope: ports and coastal waters up to 12NM, plus offshore installations in the Venezuelan EEZ. The EEZ is not a blanket listed area or transit geofence.";
+  } else if (id === "iraq") {
+    note = "JWLA-034 named-country scope: ports and coastal waters up to 12NM, including all Iraqi offshore oil terminals. Terminal calls require manual review; no blanket offshore-water geofence is implied.";
+  } else if (geometryStatus === "withheld") {
+    note = "JWLA-034 named-country scope: ports and coastal waters up to 12NM. The land outline remains available, but the 12NM source geometry is withheld because validation failed.";
+  } else {
+    note = "JWLA-034 named-country scope: ports and coastal waters up to 12NM. The land outline is neutral context; the coastal-water geometry is display-only.";
+  }
+
+  const precisionReferenceStatus = id === "iran" ? "derived-audit-only" : undefined;
+  if (precisionReferenceStatus) {
+    note += " A derived Iran Caspian 12NM precision reference is retained audit-only; it is not canonical and is not rendered as another area.";
+  }
+
+  const badge = id === "venezuela"
+    ? "12NM + INSTALLATIONS"
+    : id === "iraq"
+      ? "PROVISIONAL + TERMINALS"
+      : id === "iran"
+        ? "PROVISIONAL · DERIVED REF"
+        : geometryStatus.toUpperCase();
+
+  return {
+    ...item({
+      id: `jwc-country-${id}`,
+      label,
+      layerKeys,
+      badge,
+      note,
+      color: "#f97316",
+      opacity: 0.04,
+      geometryStatus,
+      precisionReferenceStatus,
+    }),
+    group,
+  };
+};
 
 const pending = (id, label, { badge, note, sourceUrl, color, dataStatus = "pending", ...metadata }) => item({
   id,
@@ -82,21 +124,23 @@ const JWC_034_CURRENT_WATERS = [
     id: "jwc-034-current-black-sea",
     label: "Black Sea & Sea of Azov",
     layerKey: "JWLA 034 - Black Sea & Sea of Azov",
-    badge: "CURRENT",
-    note: "Current maritime reference boundary. The circular's Ukraine, Don, Donets and Belarus inland-water clauses remain incomplete.",
+    badge: "CURRENT · DERIVED REF",
+    note: "Current maritime reference boundary. A derived marine-water precision reference is retained audit-only and is not canonical. The circular's Ukraine, Don, Donets and Belarus inland-water clauses remain unresolved.",
     defaultVisible: true,
     color: "#dc2626",
     opacity: 0.15,
+    precisionReferenceStatus: "derived-audit-only-with-unresolved-inland-waters",
   }),
   item({
     id: "jwc-034-current-gulf-guinea",
     label: "Gulf of Guinea",
     layerKey: "JWLA 034 - Gulf of Guinea",
-    badge: "CURRENT",
-    note: "Current anchor-based informational reconstruction; coastline closure remains approximate.",
+    badge: "CURRENT · DERIVED REF",
+    note: "Current anchor-based informational reconstruction; coastline closure remains approximate. A derived water-only precision reference is retained audit-only and is not canonical.",
     defaultVisible: true,
     color: "#dc2626",
     opacity: 0.15,
+    precisionReferenceStatus: "derived-audit-only",
   }),
   item({
     id: "jwc-034-current-cabo-delgado",
@@ -107,26 +151,6 @@ const JWC_034_CURRENT_WATERS = [
     defaultVisible: true,
     color: "#dc2626",
     opacity: 0.15,
-  }),
-  item({
-    id: "jwc-034-coastal-syria",
-    label: "Syria 12NM coastal waters",
-    layerKey: "JWLA 034 Coastal Waters - Syria 12NM",
-    badge: "HIGH-DETAIL",
-    note: "Verified high-detail optional reference from Marine Regions Territorial Seas v4; display-only and not connected to backend contract alerts.",
-    defaultVisible: false,
-    color: "#dc2626",
-    opacity: 0.1,
-  }),
-  item({
-    id: "jwc-034-coastal-russia",
-    label: "Russia 12NM coastal waters",
-    layerKey: "JWLA 034 Coastal Waters - Russia 12NM",
-    badge: "HIGH-DETAIL",
-    note: "Verified high-detail optional reference from Marine Regions Territorial Seas v4; display-only and not connected to backend contract alerts.",
-    defaultVisible: false,
-    color: "#dc2626",
-    opacity: 0.1,
   }),
 ];
 
@@ -237,22 +261,13 @@ const JWC_034_AMENDMENTS = [
   }),
 ];
 
-const JWC_INSTALLATIONS = [
+const JWC_SPECIAL_CALL_ONLY = [
   item({
     id: "jwc-guyana-installations",
-    label: "Guyana — offshore installation calls",
+    label: "Guyana — offshore installation calls only",
     layerKey: "JWLA 034 - Guyana Offshore Installation Reference",
-    badge: "CALLS",
-    note: "Reference footprint only. JWLA-034 applies only to calls to offshore installations beyond territorial waters; simple EEZ transit is not an entry alert.",
-    color: "#fb7185",
-    opacity: 0.05,
-  }),
-  item({
-    id: "jwc-venezuela-installations",
-    label: "Venezuela — country & offshore installations",
-    layerKey: "JWLA 034 - Venezuela Offshore Installation Reference",
-    badge: "REF",
-    note: "Reference footprint only. Offshore-installation visits require separate visit logic; the EEZ is not a blanket geofence.",
+    badge: "CALLS ONLY",
+    note: "JWLA-034 applies only to calls to offshore installations in the Guyanese EEZ beyond territorial waters. Guyana is not a general 12NM named-country area, and simple EEZ transit is not an entry event.",
     color: "#fb7185",
     opacity: 0.05,
   }),
@@ -427,74 +442,49 @@ const IWL_ITEMS = IWL_SPECS.map((spec) => pending(spec.id, spec.label, {
   ...spec,
 }));
 
-export const RISK_AREA_SECTIONS = Object.freeze([
+const JWLA_034_SUBSECTIONS = Object.freeze([
   {
-    id: "jwc-034-current",
-    regime: "JWC current reference",
-    label: "JWLA-034 Current Defined Waters",
-    countLabel: "4 defined waters · 2 verified coastal references",
-    description: "Default informational view of the current circular. Known source-data limitations are stated per area; this layer does not change backend alerts.",
+    id: "jwla-034-defined-waters",
+    regime: "JWLA-034",
+    label: "Defined Waters",
+    countLabel: "4 areas",
+    description: "Four current JWLA-034 defined-water areas. These reference layers do not change backend alerts.",
     defaultOpen: true,
     color: "#dc2626",
     items: JWC_034_CURRENT_WATERS,
   },
   {
-    id: "jwc-034-provisional-coastal",
-    regime: "JWC provisional reference",
-    label: "JWLA-034 Provisional Coastal References",
-    countLabel: "18 provisional · 2 withheld for manual review",
-    description: "Optional display-only Marine Regions references. All require manual review and do not change backend alerts; Israel and Lebanon remain withheld.",
-    defaultOpen: false,
-    color: "#f97316",
-    items: JWC_034_PROVISIONAL_COASTAL,
-  },
-  {
-    id: "jwc-034-precision-references",
-    regime: "JWC derived cartographic reference",
-    label: "JWLA-034 Precision References (Display Only)",
-    countLabel: "3 derived references · inland waters unresolved",
-    description: "Optional Natural Earth-derived cartographic references. Default off, non-authoritative, manual-review only, and never connected to backend contract alerts.",
-    defaultOpen: false,
-    color: "#06b6d4",
-    items: JWC_034_PRECISION_REFERENCES,
-  },
-  {
-    id: "contract-alerts",
-    regime: "JWLA-033 / Backend",
-    label: "JWLA-033 Baseline Areas",
-    countLabel: "22 areas · backend alert basis",
-    description: "Optional JWLA-033-era/backend comparison. These exact boundaries are used by the backend entry/exit checker; display controls do not change server alert rules.",
-    defaultOpen: false,
-    color: "#ef4444",
-    items: CONTRACT_ALERT_ITEMS,
-  },
-  {
-    id: "jwc-034-amendment",
-    regime: "JWC version delta",
-    label: "JWLA-034 Added Area",
-    countLabel: "1 northward extension",
-    description: "Optional version-comparison overlay showing only the northward Red Sea expansion beyond the JWLA-033 baseline.",
-    defaultOpen: false,
-    color: "#facc15",
-    items: JWC_034_AMENDMENTS,
-  },
-  {
-    id: "jwc-installations",
-    regime: "JWC",
-    label: "Offshore Installation Calls",
-    description: "Reference areas only; installation visits require separate visit confirmation.",
-    defaultOpen: false,
-    color: "#fb7185",
-    items: JWC_INSTALLATIONS,
-  },
-  {
-    id: "jwc-countries",
-    regime: "JWC",
-    label: "JWC Named Countries",
-    description: "Reference outlines; named countries mean ports and coastal waters up to 12NM unless varied.",
+    id: "jwla-034-named-countries",
+    regime: "JWLA-034",
+    label: "JWLA-034 Named Countries",
+    countLabel: "22 countries",
+    description: "Named countries cover ports and coastal waters up to 12NM unless specifically varied. Land outlines are neutral context; geometry quality is shown per country.",
     defaultOpen: false,
     color: "#f97316",
     items: JWC_COUNTRIES,
+  },
+  {
+    id: "jwla-034-special-call-only",
+    regime: "JWLA-034",
+    label: "Special Call-Only Areas",
+    countLabel: "1 special condition",
+    description: "Activity-based wording that must not be represented as a blanket EEZ transit area.",
+    defaultOpen: false,
+    color: "#fb7185",
+    items: JWC_SPECIAL_CALL_ONLY,
+  },
+]);
+
+export const RISK_AREA_SECTIONS = Object.freeze([
+  {
+    id: "jwla-034",
+    regime: "JWC",
+    label: "JWLA-034 Listed Areas",
+    countLabel: "4 waters · 22 countries · 1 call-only condition",
+    description: "Current JWC Listed Areas grouped by official meaning, not by geometry implementation status.",
+    defaultOpen: true,
+    color: "#dc2626",
+    subsections: JWLA_034_SUBSECTIONS,
   },
 
   {
@@ -532,30 +522,94 @@ export function getCalendarStatus(areaItem, at = new Date()) {
 }
 
 export function allRiskAreaItems() {
-  return RISK_AREA_SECTIONS.flatMap((section) => section.items);
+  return RISK_AREA_SECTIONS.flatMap((section) => (
+    section.subsections
+      ? section.subsections.flatMap((subsection) => subsection.items)
+      : section.items
+  ));
 }
+
+export const JWLA_033_COMPARISON_KEY = "__jwla033ComparisonVisible";
 
 export function migrateRiskAreaSettings(settings) {
   const current = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
-  if (current.__jwlaCurrentDefaultsVersion === 1) return current;
-  return { ...current, __jwlaCurrentDefaultsVersion: 1 };
+  if (current.__jwlaCatalogVersion === 2) return current;
+  const next = {
+    ...current,
+    [JWLA_033_COMPARISON_KEY]: false,
+    __jwlaCurrentDefaultsVersion: 2,
+    __jwlaCatalogVersion: 2,
+  };
+
+  for (const areaItem of JWC_COUNTRIES) {
+    const explicitSettings = areaItem.layerKeys
+      .map((layerKey) => current[layerKey])
+      .filter((setting) => typeof setting?.visible === "boolean");
+    if (explicitSettings.length === 0) continue;
+    const visible = explicitSettings.some((setting) => setting.visible);
+    const styleSource = current[areaItem.layerKeys[0]] || explicitSettings[0];
+    for (const layerKey of areaItem.layerKeys) {
+      next[layerKey] = {
+        color: areaItem.color,
+        opacity: areaItem.opacity,
+        ...styleSource,
+        ...current[layerKey],
+        visible,
+      };
+    }
+  }
+  return next;
+}
+
+export function isComparisonModeEnabled(settings = {}) {
+  return settings[JWLA_033_COMPARISON_KEY] === true;
+}
+
+export function setComparisonMode(settings = {}, visible) {
+  return { ...settings, [JWLA_033_COMPARISON_KEY]: Boolean(visible) };
+}
+
+export function getComparisonLayerKeys() {
+  return CONTRACT_ALERT_ITEMS.flatMap((areaItem) => areaItem.layerKeys);
 }
 
 export function shouldLoadSectionLayers(sectionId, settings = {}, focusKey = null) {
-  const section = RISK_AREA_SECTIONS.find((candidate) => candidate.id === sectionId);
+  const section = RISK_AREA_SECTIONS.flatMap((candidate) => (
+    candidate.subsections ? [candidate, ...candidate.subsections] : [candidate]
+  )).find((candidate) => candidate.id === sectionId);
   if (!section) return false;
-  return section.items.some((areaItem) => (
+  const items = section.subsections
+    ? section.subsections.flatMap((subsection) => subsection.items)
+    : section.items;
+  return items.some((areaItem) => (
     areaItem.layerKeys?.includes(focusKey)
     || areaItem.layerKeys?.some((key) => settings[key]?.visible ?? areaItem.defaultVisible)
   ));
 }
 
+const VERIFIED_COASTAL_LAYER_KEYS = new Set([
+  "JWLA 034 Coastal Waters - Syria 12NM",
+  "JWLA 034 Coastal Waters - Russia 12NM",
+]);
+const PROVISIONAL_COASTAL_LAYER_KEYS = new Set(
+  JWC_034_PROVISIONAL_COASTAL.flatMap((areaItem) => areaItem.layerKeys),
+);
+const INSTALLATION_LAYER_KEYS = new Set([
+  "JWLA 034 - Guyana Offshore Installation Reference",
+  "JWLA 034 - Venezuela Offshore Installation Reference",
+]);
+
+function shouldLoadLayerKeys(layerKeys, settings = {}, focusKey = null) {
+  if (layerKeys.has(focusKey)) return true;
+  return [...layerKeys].some((key) => settings[key]?.visible === true);
+}
+
 export function shouldLoadCoastalLayers(settings = {}, focusKey = null) {
-  const coastalItems = JWC_034_CURRENT_WATERS.filter((areaItem) => areaItem.id.startsWith("jwc-034-coastal-"));
-  return coastalItems.some((areaItem) => (
-    areaItem.layerKeys.includes(focusKey)
-    || areaItem.layerKeys.some((key) => settings[key]?.visible ?? areaItem.defaultVisible)
-  ));
+  return shouldLoadLayerKeys(VERIFIED_COASTAL_LAYER_KEYS, settings, focusKey);
+}
+
+export function shouldLoadInstallationLayers(settings = {}, focusKey = null) {
+  return shouldLoadLayerKeys(INSTALLATION_LAYER_KEYS, settings, focusKey);
 }
 
 export function planCoastalLoadRequest({ settings = {}, focusKey = null, loaded = false } = {}) {
@@ -564,16 +618,16 @@ export function planCoastalLoadRequest({ settings = {}, focusKey = null, loaded 
   return { shouldLoad, shouldRequest, urls: shouldRequest ? [COASTAL_URL] : [] };
 }
 
-export function planProvisionalCoastalLoadRequest({ settings = {}, focusKey = null, loaded = false } = {}) {
-  const shouldLoad = shouldLoadSectionLayers("jwc-034-provisional-coastal", settings, focusKey);
+export function planDefinedWaterLoadRequest({ settings = {}, focusKey = null, loaded = false } = {}) {
+  const shouldLoad = shouldLoadSectionLayers("jwla-034-defined-waters", settings, focusKey);
   const shouldRequest = shouldLoad && !loaded;
-  return { shouldLoad, shouldRequest, urls: shouldRequest ? [PROVISIONAL_COASTAL_URL] : [] };
+  return { shouldLoad, shouldRequest, urls: shouldRequest ? [DEFINED_WATERS_URL] : [] };
 }
 
-export function planPrecisionReferenceLoadRequest({ settings = {}, focusKey = null, loaded = false } = {}) {
-  const shouldLoad = shouldLoadSectionLayers("jwc-034-precision-references", settings, focusKey);
+export function planProvisionalCoastalLoadRequest({ settings = {}, focusKey = null, loaded = false } = {}) {
+  const shouldLoad = shouldLoadLayerKeys(PROVISIONAL_COASTAL_LAYER_KEYS, settings, focusKey);
   const shouldRequest = shouldLoad && !loaded;
-  return { shouldLoad, shouldRequest, urls: shouldRequest ? [PRECISION_REFERENCE_URL] : [] };
+  return { shouldLoad, shouldRequest, urls: shouldRequest ? [PROVISIONAL_COASTAL_URL] : [] };
 }
 
 export function getFeatureBounds(feature) {
@@ -706,7 +760,8 @@ export function resetSectionAppearance(settings, section) {
 }
 
 export function getLayerDefaults(layerKey) {
-  const areaItem = allRiskAreaItems().find((candidate) => candidate.layerKeys?.includes(layerKey));
+  const renderItems = [...allRiskAreaItems(), ...CONTRACT_ALERT_ITEMS, ...JWC_034_AMENDMENTS];
+  const areaItem = renderItems.find((candidate) => candidate.layerKeys?.includes(layerKey));
   if (!areaItem) return { visible: false, color: "#ef4444", opacity: 0.12 };
   return {
     visible: areaItem.defaultVisible,

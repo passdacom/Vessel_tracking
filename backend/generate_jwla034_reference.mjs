@@ -499,6 +499,10 @@ function buildAreas(countries) {
       scope: "installation-context-only",
       officialCategory: "Offshore installation calls",
       monitoringMode: "reference-only",
+      geometryRole: "installation-context-only",
+      detectionMode: "facility-visit-manual-review",
+      manualReviewRequired: true,
+      marineRegionsMrgid: 8460,
       warning: "Do not treat simple EEZ transit as a JWC entry event.",
     }),
     copyArea(global, "JWLA 033 - Venezuela (Offshore EEZ)", "JWLA 034 - Venezuela Offshore Installation Reference", {
@@ -506,6 +510,10 @@ function buildAreas(countries) {
       scope: "installation-context-only",
       officialCategory: "Named Country plus offshore installations",
       monitoringMode: "reference-only",
+      geometryRole: "installation-context-only",
+      detectionMode: "facility-visit-manual-review",
+      manualReviewRequired: true,
+      marineRegionsMrgid: 8433,
       warning: "The EEZ is a facility-location reference, not a blanket geofence.",
     }),
   ]);
@@ -811,7 +819,7 @@ function main() {
   const precision = loadPrecisionSource();
   const countries = readJson("backend/countries.geojson");
   console.log("Building JWLA-034 area references...");
-  const areas = buildAreas(countries);
+  const allAreaReferences = buildAreas(countries);
   const coastalWaters = turf.featureCollection(buildCoastalReferences(coastal));
   const provisionalCoastalWaters = turf.featureCollection(buildProvisionalCoastalReferences(provisionalCoastal));
   const precisionReferences = buildPrecisionReferences(precision);
@@ -819,7 +827,13 @@ function main() {
   const amendments = buildAmendments(countries);
   console.log("Building JWLA-034 country references...");
   const listedCountries = buildCountries(countries);
-  const installations = buildInstallationReferences(areas);
+  const installations = buildInstallationReferences(allAreaReferences);
+  const areas = turf.featureCollection(
+    allAreaReferences.features.filter((feature) => feature.properties?.scope === "defined-waters"),
+  );
+  if (areas.features.length !== 4) {
+    throw new Error(`Expected 4 JWLA-034 defined-water features, found ${areas.features.length}`);
+  }
   console.log("Validating JWLA-034 area reference structure...");
   assertWellFormed(areas, "areas");
   console.log("Validating JWLA-034 coastal reference structure...");
